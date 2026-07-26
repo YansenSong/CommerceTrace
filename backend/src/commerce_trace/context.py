@@ -4,10 +4,9 @@ import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 import yaml  # type: ignore[import-untyped]
-from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
 from .memory import MemorySearchResult, MemoryService
@@ -19,74 +18,74 @@ SCHEMA_CATALOG: dict[str, Any] = {
         "customers": {
             "description": "客户、地区、注册时间与获客渠道",
             "columns": {
-                "customer_id": "bigint 主键",
+                "customer_id": "integer 主键",
                 "name": "text 客户姓名（敏感）",
                 "region": "text 地区",
-                "registered_at": "timestamp 注册时间",
+                "registered_at": "text ISO-8601 注册时间",
                 "acquisition_channel": "text 获客渠道",
             },
         },
         "categories": {
             "description": "商品品类",
-            "columns": {"category_id": "bigint 主键", "name": "text 品类名"},
+            "columns": {"category_id": "integer 主键", "name": "text 品类名"},
         },
         "products": {
             "description": "商品与当前价格成本",
             "columns": {
-                "product_id": "bigint 主键",
-                "category_id": "bigint 外键 categories",
+                "product_id": "integer 主键",
+                "category_id": "integer 外键 categories",
                 "name": "text 商品名",
-                "current_price": "numeric 当前售价",
-                "current_cost": "numeric 当前成本",
+                "current_price": "real 当前售价",
+                "current_cost": "real 当前成本",
             },
         },
         "orders": {
             "description": "订单时间、状态、客户和渠道",
             "columns": {
-                "order_id": "bigint 主键",
-                "customer_id": "bigint 外键 customers",
-                "ordered_at": "timestamp 下单时间",
+                "order_id": "integer 主键",
+                "customer_id": "integer 外键 customers",
+                "ordered_at": "text ISO-8601 下单时间",
                 "status": "text paid|completed|cancelled|refunded",
                 "channel": "text 渠道",
-                "total_amount": "numeric 成交总额",
+                "total_amount": "real 成交总额",
             },
         },
         "order_items": {
             "description": "订单商品明细和成交时价格成本",
             "columns": {
-                "order_item_id": "bigint 主键",
-                "order_id": "bigint 外键 orders",
-                "product_id": "bigint 外键 products",
+                "order_item_id": "integer 主键",
+                "order_id": "integer 外键 orders",
+                "product_id": "integer 外键 products",
                 "quantity": "integer 数量",
-                "unit_price": "numeric 成交单价",
-                "unit_cost": "numeric 成交时成本",
+                "unit_price": "real 成交单价",
+                "unit_cost": "real 成交时成本",
             },
         },
         "payments": {
             "description": "支付时间、方式与金额",
             "columns": {
-                "payment_id": "bigint 主键",
-                "order_id": "bigint 外键 orders",
-                "paid_at": "timestamp 支付时间",
+                "payment_id": "integer 主键",
+                "order_id": "integer 外键 orders",
+                "paid_at": "text ISO-8601 支付时间",
                 "payment_method": "text 支付方式",
-                "amount": "numeric 支付金额",
+                "amount": "real 支付金额",
             },
         },
         "refunds": {
             "description": "退款时间、原因与金额",
             "columns": {
-                "refund_id": "bigint 主键",
-                "order_id": "bigint 外键 orders",
-                "refunded_at": "timestamp 退款时间",
+                "refund_id": "integer 主键",
+                "order_id": "integer 外键 orders",
+                "refunded_at": "text ISO-8601 退款时间",
                 "reason": "text 退款原因",
-                "amount": "numeric 退款金额",
+                "amount": "real 退款金额",
             },
         },
         "inventory_snapshots": {
             "description": "商品每日库存",
             "columns": {
-                "snapshot_date": "date 联合主键",
-                "product_id": "bigint 联合主键、外键 products",
+                "snapshot_date": "text ISO 日期、联合主键",
+                "product_id": "integer 联合主键、外键 products",
                 "stock_quantity": "integer 库存量",
             },
         },
@@ -177,46 +176,6 @@ class SchemaProvider(Protocol):
 
 class StaticSchemaProvider:
     async def load(self) -> dict[str, Any]:
-        return deepcopy(SCHEMA_CATALOG)
-
-
-class PostgresSchemaProvider:
-    """Validates the versioned semantic catalog against PostgreSQL metadata."""
-
-    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
-        self.pool = pool
-
-    async def load(self) -> dict[str, Any]:
-        async with self.pool.connection() as connection:
-            raw_rows = await (
-                await connection.execute(
-                    """
-                    SELECT table_name, column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'ecommerce'
-                    ORDER BY table_name, ordinal_position
-                    """
-                )
-            ).fetchall()
-        rows = cast(list[dict[str, Any]], raw_rows)
-        observed: dict[str, set[str]] = {}
-        for row in rows:
-            observed.setdefault(str(row["table_name"]), set()).add(str(row["column_name"]))
-        expected = {
-            table: set(details["columns"]) for table, details in SCHEMA_CATALOG["tables"].items()
-        }
-        if observed != expected:
-            missing_tables = sorted(set(expected) - set(observed))
-            extra_tables = sorted(set(observed) - set(expected))
-            changed_columns = sorted(
-                table
-                for table in set(expected) & set(observed)
-                if expected[table] != observed[table]
-            )
-            raise RuntimeError(
-                "schema_catalog_mismatch:"
-                f"missing={missing_tables},extra={extra_tables},columns={changed_columns}"
-            )
         return deepcopy(SCHEMA_CATALOG)
 
 

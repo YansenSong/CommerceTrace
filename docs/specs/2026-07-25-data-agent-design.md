@@ -1,5 +1,7 @@
 # 中文电商经营分析 Data Agent 设计文档
 
+> 2026-07-26 实现决策：当前本地 MVP 不使用 Docker 或 PostgreSQL，改用 Python 标准库 SQLite。`ecommerce` 与 `agent_app` 通过附加数据库文件保持边界，业务查询连接强制 `PRAGMA query_only=ON`。下文原 PostgreSQL 描述保留为早期设计背景，如有冲突以此实现决策为准。
+
 日期：2026-07-25
 
 状态：已确认，待编写实现计划

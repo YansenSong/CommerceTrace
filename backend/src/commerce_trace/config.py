@@ -15,10 +15,7 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["development", "test", "production"] = "development"
-    database_url: str = "postgresql://commerce_app:commerce_app@postgres:5432/commerce_trace"
-    query_database_url: str = (
-        "postgresql://commerce_reader:commerce_reader@postgres:5432/commerce_trace"
-    )
+    database_path: Path = Path("data/commerce_trace.db")
     llm_mode: Literal["fake", "openai"] = "fake"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str | None = None

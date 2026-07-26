@@ -10,7 +10,7 @@ from .memory import MemoryRecord, MemoryStatus
 
 
 class ChromaMemoryIndex:
-    """Rebuildable Chroma index; PostgreSQL and knowledge files remain authoritative."""
+    """Rebuildable Chroma index; SQLite and knowledge files remain authoritative."""
 
     business_collection_name = "business_memory_index"
     tool_collection_name = "tool_memory_index"

@@ -76,7 +76,7 @@ class ScriptedLlm(LlmService):
                     name="run_sql",
                     arguments={
                         "sql": (
-                            "SELECT date_trunc('month', ordered_at) AS month, "
+                            "SELECT strftime('%Y-%m', ordered_at) AS month, "
                             "SUM(total_amount) AS revenue, COUNT(*) AS order_count, "
                             "AVG(total_amount) AS aov "
                             "FROM ecommerce.orders "

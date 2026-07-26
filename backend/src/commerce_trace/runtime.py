@@ -5,29 +5,20 @@ from pathlib import Path
 
 from .agent import Agent
 from .config import Settings
-from .context import (
-    ContextAssembler,
-    KnowledgeLoader,
-    PostgresSchemaProvider,
-    schema_fingerprint,
-)
+from .context import ContextAssembler, KnowledgeLoader, schema_fingerprint
 from .llm import LlmService, OpenAICompatibleLlm, ScriptedLlm
 from .memory import MemoryService
 from .memory_index import ChromaMemoryIndex
-from .postgres import (
-    PostgresResources,
-    PostgresSqlExecutor,
-    PostgresStore,
-)
 from .sql_safety import SqlSafetyPolicy
+from .sqlite import SQLiteResources, SQLiteSchemaProvider, SQLiteSqlExecutor, SQLiteStore
 from .tools import build_default_registry
 
 
 @dataclass
 class Runtime:
-    store: PostgresStore
+    store: SQLiteStore
     agent: Agent
-    resources: list[PostgresResources]
+    resources: list[SQLiteResources]
 
 
 @dataclass(frozen=True)
@@ -51,8 +42,8 @@ def build_runtime(
     features: FeatureConfiguration | None = None,
 ) -> Runtime:
     features = features or FeatureConfiguration()
-    app_resources = PostgresResources(settings.database_url)
-    query_resources = PostgresResources(settings.query_database_url, min_size=1, max_size=4)
+    database_path = _project_path(settings.database_path)
+    resources = SQLiteResources(database_path)
     try:
         import chromadb  # type: ignore[import-not-found]  # noqa: F401
 
@@ -61,7 +52,7 @@ def build_runtime(
         )
     except ImportError:
         derived_index = None
-    store = PostgresStore(app_resources, index_health=derived_index)
+    store = SQLiteStore(resources, index_health=derived_index)
     memory = MemoryService(
         store=store,
         schema_fingerprint=schema_fingerprint(),
@@ -69,8 +60,8 @@ def build_runtime(
         index=derived_index,
         allow_candidates=features.include_candidates,
     )
-    executor = PostgresSqlExecutor(
-        query_resources,
+    executor = SQLiteSqlExecutor(
+        database_path,
         statement_timeout_ms=settings.statement_timeout_ms,
     )
     policy = SqlSafetyPolicy(
@@ -95,7 +86,7 @@ def build_runtime(
             knowledge_loader=KnowledgeLoader(_project_path(settings.knowledge_path)),
             include_knowledge=features.include_knowledge,
             include_memory=features.include_memory,
-            schema_provider=PostgresSchemaProvider(app_resources.pool),
+            schema_provider=SQLiteSchemaProvider(resources),
         ),
         store=store,
         memory=memory,
@@ -108,5 +99,5 @@ def build_runtime(
     return Runtime(
         store=store,
         agent=agent,
-        resources=[app_resources, query_resources],
+        resources=[resources],
     )

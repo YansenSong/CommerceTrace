@@ -4,7 +4,6 @@ import hashlib
 import json
 import random
 from collections import defaultdict
-from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -245,19 +244,3 @@ COPY_COLUMNS = {
     "refunds": ("refund_id", "order_id", "refunded_at", "reason", "amount"),
     "inventory_snapshots": ("snapshot_date", "product_id", "stock_quantity"),
 }
-
-
-def iter_copy_statements(data: GeneratedData) -> Iterator[tuple[str, list[tuple[Any, ...]]]]:
-    order = [
-        "categories",
-        "products",
-        "customers",
-        "orders",
-        "order_items",
-        "payments",
-        "refunds",
-        "inventory_snapshots",
-    ]
-    for table in order:
-        columns = ", ".join(COPY_COLUMNS[table])
-        yield f"COPY ecommerce.{table} ({columns}) FROM STDIN", data.tables[table]

@@ -11,7 +11,6 @@ requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
   "httpx>=0.27",
-  "psycopg[binary,pool]>=3.2",
   "pydantic>=2.10",
   "pydantic-settings>=2.7",
   "PyYAML>=6.0",
@@ -26,6 +25,7 @@ data = [
 ]
 memory = [
   "chromadb>=1.0",
+  "onnxruntime==1.23.2; python_version < '3.11'",
   "sentence-transformers>=3.4",
 ]
 test = [
@@ -45,7 +45,7 @@ packages = ["src/commerce_trace"]
 addopts = "-q"
 asyncio_mode = "auto"
 markers = [
-  "integration: requires PostgreSQL or another external service",
+  "integration: exercises the local SQLite persistence boundary",
   "model: requires a real OpenAI-compatible model",
   "embedding: requires the configured embedding model",
 ]

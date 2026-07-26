@@ -125,7 +125,7 @@ class ToolRegistry:
 
 class RunSqlTool(Tool[RunSqlArgs]):
     name = "run_sql"
-    description = "执行一条有界的 PostgreSQL 只读业务查询"
+    description = "执行一条有界的 SQLite 只读业务查询"
     args_model = RunSqlArgs
 
     def __init__(self, executor: SqlExecutor, policy: SqlSafetyPolicy | None = None) -> None:

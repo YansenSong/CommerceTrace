@@ -62,7 +62,7 @@ class SqlSafetyPolicy:
         if not raw:
             raise SqlSafetyError("empty_sql", "查询不能为空")
         try:
-            statements = sqlglot.parse(raw, read="postgres")
+            statements = sqlglot.parse(raw, read="sqlite")
         except ParseError as exc:
             raise SqlSafetyError("invalid_sql", "SQL 无法解析") from exc
         if len(statements) != 1:
@@ -75,7 +75,7 @@ class SqlSafetyPolicy:
             if explained.upper().startswith(("ANALYZE", "(")):
                 raise SqlSafetyError("unsafe_explain", "只允许不执行查询的 EXPLAIN")
             try:
-                parsed_explain = sqlglot.parse_one(explained, read="postgres")
+                parsed_explain = sqlglot.parse_one(explained, read="sqlite")
             except ParseError as exc:
                 raise SqlSafetyError("invalid_sql", "EXPLAIN 中的 SQL 无法解析") from exc
             if parsed_explain is None:
@@ -126,9 +126,9 @@ class SqlSafetyPolicy:
             self._validate_distinct_exploration(statement)
 
         limit = self.max_distinct_values if is_distinct else self.max_rows
-        normalized = statement.sql(dialect="postgres", pretty=False)
+        normalized = statement.sql(dialect="sqlite", pretty=False)
         if explain:
-            normalized = f"EXPLAIN {normalized}"
+            normalized = f"EXPLAIN QUERY PLAN {normalized}"
         return ValidatedSql(
             normalized_sql=normalized,
             row_limit=limit,

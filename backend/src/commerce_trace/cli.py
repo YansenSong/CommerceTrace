@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sqlite3
 import sys
 from dataclasses import asdict
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
-
-import psycopg
 
 from .bootstrap import (
     bootstrap_memory,
@@ -27,9 +28,9 @@ from .evaluation import (
 from .memory import MemoryService, memory_report
 from .memory_index import ChromaMemoryIndex
 from .memory_replay import load_golden_cases, replay_memories, write_replay_report
-from .postgres import PostgresResources, PostgresSqlExecutor, PostgresStore
 from .runtime import FeatureConfiguration, build_runtime
 from .sql_safety import SqlSafetyPolicy
+from .sqlite import SQLiteResources, SQLiteSqlExecutor, SQLiteStore, connect_sqlite
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -38,20 +39,18 @@ def migrate(settings: Settings) -> None:
     migration_paths = sorted((PROJECT_ROOT / "migrations").glob("*.sql"))
     if not migration_paths:
         raise RuntimeError("no migrations found")
-    with (
-        psycopg.connect(settings.database_url, autocommit=True) as connection,
-        connection.cursor() as cursor,
-    ):
+    with connect_sqlite(project_path(settings.database_path)) as connection:
         for path in migration_paths:
-            cursor.execute(path.read_text(encoding="utf-8"))
+            connection.executescript(path.read_text(encoding="utf-8"))
             print(f"applied {path.name}")
+        connection.commit()
 
 
 def generate_data(settings: Settings, profile: str) -> dict[str, Any]:
     sys.path.insert(0, str(PROJECT_ROOT))
     from data_generator.generate import (  # type: ignore[import-not-found]
+        COPY_COLUMNS,
         generate,
-        iter_copy_statements,
         load_config,
     )
 
@@ -67,59 +66,96 @@ def generate_data(settings: Settings, profile: str) -> dict[str, Any]:
         "categories",
         "customers",
     ]
-    with psycopg.connect(settings.database_url) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "TRUNCATE "
-                + ", ".join(f"ecommerce.{table}" for table in truncate_order)
-                + " RESTART IDENTITY CASCADE"
-            )
-            for statement, rows in iter_copy_statements(generated):
-                with cursor.copy(statement) as copy:
-                    for row in rows:
-                        copy.write_row(row)
-            cursor.execute(
-                """
-                INSERT INTO agent_app.dataset_metadata
-                  (singleton, data_version, seed, profile, result_hash, row_counts)
-                VALUES (TRUE, %s, %s, %s, %s, %s::jsonb)
-                ON CONFLICT (singleton) DO UPDATE SET
-                  data_version = EXCLUDED.data_version,
-                  seed = EXCLUDED.seed,
-                  profile = EXCLUDED.profile,
-                  result_hash = EXCLUDED.result_hash,
-                  row_counts = EXCLUDED.row_counts,
-                  generated_at = now()
+    with connect_sqlite(project_path(settings.database_path)) as connection:
+        for table in truncate_order:
+            connection.execute(f"DELETE FROM ecommerce.{table}")
+        insert_order = [
+            "categories",
+            "products",
+            "customers",
+            "orders",
+            "order_items",
+            "payments",
+            "refunds",
+            "inventory_snapshots",
+        ]
+        for table in insert_order:
+            columns = COPY_COLUMNS[table]
+            placeholders = ", ".join("?" for _ in columns)
+            connection.executemany(
+                f"""
+                INSERT INTO ecommerce.{table} ({", ".join(columns)})
+                VALUES ({placeholders})
                 """,
-                (
-                    generated.metadata["version"],
-                    generated.metadata["seed"],
-                    profile,
-                    generated.result_hash,
-                    json.dumps(generated.metadata["row_counts"]),
-                ),
+                [tuple(_sqlite_value(value) for value in row) for row in generated.tables[table]],
             )
+        connection.execute(
+            """
+            INSERT INTO agent_app.dataset_metadata
+              (singleton, data_version, seed, profile, result_hash, row_counts, generated_at)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (singleton) DO UPDATE SET
+              data_version = excluded.data_version,
+              seed = excluded.seed,
+              profile = excluded.profile,
+              result_hash = excluded.result_hash,
+              row_counts = excluded.row_counts,
+              generated_at = excluded.generated_at
+            """,
+            (
+                generated.metadata["version"],
+                generated.metadata["seed"],
+                profile,
+                generated.result_hash,
+                json.dumps(generated.metadata["row_counts"]),
+                datetime.utcnow().isoformat(),
+            ),
+        )
         connection.commit()
     print(json.dumps(generated.metadata, ensure_ascii=False, indent=2))
     return dict(generated.metadata)
 
 
+def _sqlite_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+
+
 def dataset_exists(settings: Settings) -> bool:
-    with psycopg.connect(settings.database_url) as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT EXISTS (SELECT 1 FROM agent_app.dataset_metadata)")
-        row = cursor.fetchone()
+    try:
+        with connect_sqlite(project_path(settings.database_path), read_only=True) as connection:
+            row = connection.execute(
+                "SELECT EXISTS (SELECT 1 FROM agent_app.dataset_metadata)"
+            ).fetchone()
+    except sqlite3.Error:
+        return False
     return bool(row and row[0])
 
 
 async def bootstrap_and_rebuild(settings: Settings, *, rebuild_index: bool) -> None:
-    resources = PostgresResources(settings.database_url)
+    resources = SQLiteResources(project_path(settings.database_path))
     await resources.open()
     try:
-        store = PostgresStore(resources)
+        store = SQLiteStore(resources)
         records = await bootstrap_memory(store, project_path(settings.knowledge_path))
         print(json.dumps(memory_report(records), ensure_ascii=False, indent=2))
         if rebuild_index:
-            index = ChromaMemoryIndex(project_path(settings.chroma_path), settings.embedding_model)
+            index = optional_chroma_index(settings)
+            if index is None:
+                print(
+                    json.dumps(
+                        {
+                            "tool_memory_index": "sqlite_lexical_fallback",
+                            "business_memory_index": "disabled",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return
             tool_count = await index.rebuild(await store.list_memories())
             business_count = await index.rebuild_business(
                 load_business_documents(project_path(settings.knowledge_path))
@@ -139,11 +175,15 @@ async def bootstrap_and_rebuild(settings: Settings, *, rebuild_index: bool) -> N
 
 
 async def rebuild_index(settings: Settings) -> None:
-    resources = PostgresResources(settings.database_url)
+    resources = SQLiteResources(project_path(settings.database_path))
     await resources.open()
     try:
-        store = PostgresStore(resources)
-        index = ChromaMemoryIndex(project_path(settings.chroma_path), settings.embedding_model)
+        store = SQLiteStore(resources)
+        index = optional_chroma_index(settings)
+        if index is None:
+            raise RuntimeError(
+                "ChromaDB is optional; run `uv sync --extra memory` before rebuilding it"
+            )
         tool_count = await index.rebuild(await store.list_memories())
         business_count = await index.rebuild_business(
             load_business_documents(project_path(settings.knowledge_path))
@@ -163,13 +203,12 @@ async def rebuild_index(settings: Settings) -> None:
 
 
 async def replay_memory(settings: Settings) -> None:
-    app_resources = PostgresResources(settings.database_url)
-    query_resources = PostgresResources(settings.query_database_url, min_size=1, max_size=2)
-    await app_resources.open()
-    await query_resources.open()
+    database_path = project_path(settings.database_path)
+    resources = SQLiteResources(database_path)
+    await resources.open()
     try:
-        store = PostgresStore(app_resources)
-        index = ChromaMemoryIndex(project_path(settings.chroma_path), settings.embedding_model)
+        store = SQLiteStore(resources)
+        index = optional_chroma_index(settings)
         service = MemoryService(
             store=store,
             schema_fingerprint=schema_fingerprint(),
@@ -178,8 +217,8 @@ async def replay_memory(settings: Settings) -> None:
         )
         report = await replay_memories(
             service=service,
-            executor=PostgresSqlExecutor(
-                query_resources,
+            executor=SQLiteSqlExecutor(
+                database_path,
                 statement_timeout_ms=settings.statement_timeout_ms,
             ),
             policy=SqlSafetyPolicy(
@@ -194,12 +233,22 @@ async def replay_memory(settings: Settings) -> None:
         paths = write_replay_report(report, PROJECT_ROOT / "reports")
         print("\n".join(str(path) for path in paths))
     finally:
-        await query_resources.close()
-        await app_resources.close()
+        await resources.close()
 
 
 def project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def optional_chroma_index(settings: Settings) -> ChromaMemoryIndex | None:
+    try:
+        import chromadb  # type: ignore[import-not-found]  # noqa: F401
+    except ImportError:
+        return None
+    return ChromaMemoryIndex(
+        project_path(settings.chroma_path),
+        settings.embedding_model,
+    )
 
 
 async def evaluate(settings: Settings, *, limit: int | None) -> None:
@@ -345,7 +394,7 @@ async def ablation(settings: Settings, *, limit: int | None) -> None:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="commerce-trace")
     commands = root.add_subparsers(dest="command", required=True)
-    commands.add_parser("migrate", help="Apply PostgreSQL migrations")
+    commands.add_parser("migrate", help="Apply SQLite migrations")
     generate_parser = commands.add_parser(
         "generate-data", help="Generate and load fixed-seed ecommerce data"
     )

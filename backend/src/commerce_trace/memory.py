@@ -124,7 +124,7 @@ class MemoryService:
     async def record_candidate(self, question: str, evidence: Evidence) -> MemoryRecord:
         tables_and_columns: set[str] = set()
         try:
-            expression = parse_one(evidence.sql, read="postgres")
+            expression = parse_one(evidence.sql, read="sqlite")
             aliases = {table.alias_or_name: table.name for table in expression.find_all(exp.Table)}
             tables_and_columns.update(aliases.values())
             for column in expression.find_all(exp.Column):
@@ -148,7 +148,7 @@ class MemoryService:
         )
         saved = await self.store.upsert_memory(record)
         if self.index is not None:
-            # PostgreSQL remains authoritative if the derived index is unavailable.
+            # SQLite remains authoritative if the derived index is unavailable.
             with suppress(Exception):
                 await self.index.rebuild(await self.store.list_memories())
         return saved

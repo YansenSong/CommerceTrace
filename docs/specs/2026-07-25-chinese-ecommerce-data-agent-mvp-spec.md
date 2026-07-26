@@ -1,5 +1,7 @@
 # 中文电商经营分析 Data Agent MVP 规格
 
+> 2026-07-26 范围调整：当前测试与本地运行数据库统一改为 SQLite，不使用 Docker 或 PostgreSQL。`ecommerce` 与 `agent_app` 分别存入附加数据库文件，独立查询连接通过 `PRAGMA query_only=ON` 提供数据库层只读防线。下文早期 PostgreSQL 条目由本调整覆盖。
+
 日期：2026-07-25
 
 状态：已确认；待实现
