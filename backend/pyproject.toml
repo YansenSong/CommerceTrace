@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "commerce-trace"
+version = "0.1.0"
+description = "Evidence-backed Chinese ecommerce data agent"
+readme = "../README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115",
+  "httpx>=0.27",
+  "psycopg[binary,pool]>=3.2",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "PyYAML>=6.0",
+  "sqlglot>=26.0",
+  "uvicorn[standard]>=0.34",
+]
+
+[project.optional-dependencies]
+data = [
+  "Faker>=33.0",
+  "numpy>=2.0",
+]
+memory = [
+  "chromadb>=1.0",
+  "sentence-transformers>=3.4",
+]
+test = [
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+commerce-trace = "commerce_trace.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/commerce_trace"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+markers = [
+  "integration: requires PostgreSQL or another external service",
+  "model: requires a real OpenAI-compatible model",
+  "embedding: requires the configured embedding model",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["commerce_trace"]
+warn_unused_ignores = false

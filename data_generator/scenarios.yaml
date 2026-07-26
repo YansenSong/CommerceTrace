@@ -1,0 +1,31 @@
+version: "1.0.0"
+seed: 20260725
+profiles:
+  test:
+    customers: 80
+    categories: 6
+    products: 24
+    orders: 300
+    inventory_days: 14
+  demo:
+    customers: 20000
+    categories: 20
+    products: 2000
+    orders: 100000
+    inventory_days: 90
+scenarios:
+  east_order_decline:
+    target_month: "2025-07"
+    region: "华东"
+    order_multiplier: 0.55
+  digital_refund_rise:
+    category: "数码"
+    refund_probability: 0.28
+  feed_low_repeat:
+    channel: "信息流"
+    new_customer_multiplier: 1.8
+    repeat_probability: 0.12
+  stockout_cancellation:
+    category: "家电"
+    stockout_probability: 0.32
+    cancellation_probability: 0.36

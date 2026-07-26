@@ -1,0 +1,27 @@
+- id: revenue
+  name: 销售额
+  version: "1"
+  definition: 已支付或已完成订单的成交总额
+  expression: SUM(ecommerce.orders.total_amount)
+  filters:
+    - "orders.status IN ('paid', 'completed')"
+- id: net_revenue
+  name: 净销售额
+  version: "1"
+  definition: 销售额减去退款金额
+  expression: revenue - SUM(ecommerce.refunds.amount)
+- id: order_count
+  name: 订单量
+  version: "1"
+  definition: 订单记录数；回答时必须说明是否排除取消订单
+  expression: COUNT(DISTINCT ecommerce.orders.order_id)
+- id: aov
+  name: 客单价
+  version: "1"
+  definition: 销售额除以非取消订单量
+  expression: revenue / NULLIF(order_count, 0)
+- id: refund_rate
+  name: 退款率
+  version: "1"
+  definition: 退款订单数除以已支付订单数
+  expression: refund_order_count / NULLIF(paid_order_count, 0)
