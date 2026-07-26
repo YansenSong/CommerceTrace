@@ -7,6 +7,43 @@ from commerce_trace.storage import InMemoryStore
 from commerce_trace.tools import FakeSqlExecutor, build_default_registry
 
 
+async def test_greeting_completes_without_llm_or_business_query() -> None:
+    store = InMemoryStore()
+    memory = MemoryService(store=store, schema_fingerprint="schema-v1", metric_versions={})
+    executor = FakeSqlExecutor(rows=[{"revenue": 999_999.0}])
+    agent = Agent(
+        llm=ScriptedLlm(),
+        registry=build_default_registry(executor=executor, memory=memory),
+        context_assembler=ContextAssembler(memory=memory),
+        store=store,
+        memory=memory,
+    )
+
+    events = [
+        event
+        async for event in agent.run(
+            user_id="greeting-user",
+            conversation_id="greeting-conversation",
+            request_id="greeting-request",
+            question="hi",
+        )
+    ]
+
+    assert [event.event for event in events] == [
+        EventType.CONVERSATION_STARTED,
+        EventType.ANSWER_DELTA,
+        EventType.ANSWER_COMPLETED,
+    ]
+    completed = events[-1]
+    assert completed.payload["status"] == "completed"
+    assert completed.payload["intent"] == "greeting"
+    assert completed.payload["evidence_ids"] == []
+    assert completed.payload["usage"]["llm_calls"] == 0
+    assert completed.payload["usage"]["business_sql_calls"] == 0
+    assert "销售额：" not in completed.payload["answer"]
+    assert await store.list_memories() == []
+
+
 async def test_simple_question_streams_plan_tool_evidence_chart_answer_and_candidate() -> None:
     store = InMemoryStore()
     memory = MemoryService(

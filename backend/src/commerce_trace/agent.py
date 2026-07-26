@@ -119,6 +119,42 @@ class Agent:
             )
             return
 
+        if self._is_greeting(question):
+            answer = (
+                "你好，我是商迹。你可以直接问我销售额、订单量、退款、地区或品类等经营问题。"
+            )
+            yield await self._make_event(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                request_id=request_id,
+                event=EventType.ANSWER_DELTA,
+                payload={"delta": answer},
+            )
+            await self.store.save_message(conversation_id, "assistant", answer)
+            yield await self._make_event(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                request_id=request_id,
+                event=EventType.ANSWER_COMPLETED,
+                payload={
+                    "answer": answer,
+                    "evidence_ids": [],
+                    "status": "completed",
+                    "intent": "greeting",
+                    "usage": {
+                        "tool_iterations": 0,
+                        "business_sql_calls": 0,
+                        "llm_calls": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "trusted_recalled": 0,
+                        "candidate_recalled": 0,
+                        "candidate_adopted": 0,
+                    },
+                },
+            )
+            return
+
         if self._requires_clarification(question):
             answer = "请确认销售额口径（成交额或扣除退款后的净销售额）以及比较时间范围。"
             yield await self._make_event(
@@ -448,6 +484,11 @@ class Agent:
             "最近表现好吗",
         }
         return question.strip("？?。 ") in vague
+
+    @staticmethod
+    def _is_greeting(question: str) -> bool:
+        normalized = question.casefold().strip(" \t\r\n,，.!！?？。")
+        return normalized in {"hi", "hello", "hey", "你好", "您好", "嗨", "哈喽", "在吗"}
 
     @staticmethod
     def _is_unsafe_request(question: str) -> bool:

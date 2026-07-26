@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from abc import ABC, abstractmethod
 from typing import Any
 from uuid import uuid4
@@ -8,6 +9,21 @@ from uuid import uuid4
 import httpx
 
 from .contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
+
+
+def _http_proxy_from_environment() -> str | None:
+    for variable in (
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        value = os.environ.get(variable)
+        if value and value.startswith(("http://", "https://")):
+            return value
+    return None
 
 
 class LlmService(ABC):
@@ -22,7 +38,7 @@ class LlmService(ABC):
 
 
 class ScriptedLlm(LlmService):
-    """Deterministic tool-calling model used by tests and the local demo."""
+    """Deterministic tool-calling test double; never used by the application runtime."""
 
     async def complete(
         self,
@@ -220,11 +236,13 @@ class OpenAICompatibleLlm(LlmService):
         api_key: str,
         model: str,
         timeout: float = 60,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.transport = transport
 
     async def complete(
         self,
@@ -266,9 +284,16 @@ class OpenAICompatibleLlm(LlmService):
             ],
             "tool_choice": "auto",
             "temperature": 0,
+            "thinking": {"type": "disabled"},
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        proxy = None if self.transport is not None else _http_proxy_from_environment()
+        async with httpx.AsyncClient(
+            timeout=self.timeout,
+            transport=self.transport,
+            proxy=proxy,
+            trust_env=False,
+        ) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=headers,

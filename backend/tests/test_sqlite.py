@@ -5,6 +5,7 @@ import pytest
 from commerce_trace.cli import dataset_exists, generate_data, migrate
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
+from commerce_trace.llm import ScriptedLlm
 from commerce_trace.memory import MemoryRecord, MemoryStatus
 from commerce_trace.runtime import build_runtime
 from commerce_trace.sqlite import (
@@ -74,7 +75,7 @@ async def test_sqlite_runtime_persists_real_evidence_and_replay(tmp_path: Path) 
     settings = Settings(database_path=tmp_path / "commerce_trace.db")
     migrate(settings)
     generate_data(settings, "test")
-    runtime = build_runtime(settings)
+    runtime = build_runtime(settings, llm=ScriptedLlm())
     for resource in runtime.resources:
         await resource.open()
     try:

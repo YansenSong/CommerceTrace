@@ -6,7 +6,7 @@ from pathlib import Path
 from .agent import Agent
 from .config import Settings
 from .context import ContextAssembler, KnowledgeLoader, schema_fingerprint
-from .llm import LlmService, OpenAICompatibleLlm, ScriptedLlm
+from .llm import LlmService, OpenAICompatibleLlm
 from .memory import MemoryService
 from .memory_index import ChromaMemoryIndex
 from .sql_safety import SqlSafetyPolicy
@@ -40,6 +40,7 @@ def _project_path(path: Path) -> Path:
 def build_runtime(
     settings: Settings,
     features: FeatureConfiguration | None = None,
+    llm: LlmService | None = None,
 ) -> Runtime:
     features = features or FeatureConfiguration()
     database_path = _project_path(settings.database_path)
@@ -68,16 +69,14 @@ def build_runtime(
         max_rows=settings.max_result_rows,
         max_distinct_values=settings.max_distinct_values,
     )
-    if settings.llm_mode == "openai":
-        if not settings.openai_api_key:
-            raise ValueError("COMMERCE_TRACE_OPENAI_API_KEY is required in openai mode")
-        llm: LlmService = OpenAICompatibleLlm(
-            base_url=settings.openai_base_url,
-            api_key=settings.openai_api_key,
-            model=settings.openai_model,
+    if llm is None:
+        if settings.deepseek_api_key is None:
+            raise ValueError("COMMERCE_TRACE_DEEPSEEK_API_KEY is required")
+        llm = OpenAICompatibleLlm(
+            base_url=settings.deepseek_base_url,
+            api_key=settings.deepseek_api_key.get_secret_value(),
+            model=settings.deepseek_model,
         )
-    else:
-        llm = ScriptedLlm()
     agent = Agent(
         llm=llm,
         registry=build_default_registry(executor=executor, memory=memory, policy=policy),

@@ -261,8 +261,8 @@ async def evaluate(settings: Settings, *, limit: int | None) -> None:
             agent=runtime.agent,
             dataset=dataset,
             configuration={
-                "model_mode": settings.llm_mode,
-                "model": settings.openai_model if settings.llm_mode == "openai" else "scripted",
+                "model_provider": "deepseek",
+                "model": settings.deepseek_model,
                 "schema_version": settings.schema_version,
                 "knowledge_version": settings.knowledge_version,
                 "data_seed": 20260725,
@@ -298,7 +298,8 @@ async def memory_experiment(settings: Settings, *, limit: int) -> None:
             cold_cases=base_cases,
             warm_cases=warm_cases,
             configuration={
-                "model_mode": settings.llm_mode,
+                "model_provider": "deepseek",
+                "model": settings.deepseek_model,
                 "schema_version": settings.schema_version,
                 "knowledge_version": settings.knowledge_version,
                 "data_seed": 20260725,
@@ -368,7 +369,8 @@ async def ablation(settings: Settings, *, limit: int | None) -> None:
                 configuration={
                     "variant": name,
                     "features": asdict(features),
-                    "model_mode": settings.llm_mode,
+                    "model_provider": "deepseek",
+                    "model": settings.deepseek_model,
                     "schema_version": settings.schema_version,
                     "knowledge_version": settings.knowledge_version,
                     "data_seed": 20260725,
@@ -383,7 +385,8 @@ async def ablation(settings: Settings, *, limit: int | None) -> None:
         configuration={
             "dataset": dataset.version,
             "limit": limit,
-            "model_mode": settings.llm_mode,
+            "model_provider": "deepseek",
+            "model": settings.deepseek_model,
             "data_seed": 20260725,
         },
         directory=PROJECT_ROOT / "reports",

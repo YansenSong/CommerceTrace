@@ -7,7 +7,7 @@ CommerceTrace 是一个面向中文电商经营分析的、证据驱动的单 Ag
 ## 能力
 
 - 匿名 Cookie 身份、对话历史、完整 SSE 事件回放和用户隔离
-- 确定性 Fake LLM，以及可选的 OpenAI-compatible 异步 Tool Calling 客户端
+- DeepSeek V4 Flash 异步 Tool Calling；确定性模型替身仅用于自动化测试
 - 完整 Schema 首轮注入、版本化中文指标/规则和本地记忆检索
 - SQLGlot AST 白名单、SQLite `query_only` 防线、超时与结果上限
 - 最多 10 轮工具、5 次业务 SQL、同一目的最多 2 次修正
@@ -17,7 +17,7 @@ CommerceTrace 是一个面向中文电商经营分析的、证据驱动的单 Ag
 
 ## 快速开始
 
-本项目不使用 Docker。请先在本机安装：
+请先在本机安装：
 
 - Python 3.10 或以上版本
 - [UV](https://docs.astral.sh/uv/)
@@ -30,6 +30,8 @@ cp .env.example .env
 make sync
 make init
 ```
+
+启动后端前，请在 `.env` 中填写 `COMMERCE_TRACE_DEEPSEEK_API_KEY`。真实密钥只应保存在本地 `.env`，不要提交到 Git。
 
 `make init` 会依次执行 SQLite 迁移、固定种子数据生成和 Trusted Memory 载入。默认检索直接使用 SQLite 权威记录，不需要独立数据库服务。
 
@@ -94,10 +96,9 @@ npm --prefix frontend run dev
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `COMMERCE_TRACE_DATABASE_PATH` | `data/commerce_trace.db` | SQLite 主文件；业务与应用数据文件由此派生 |
-| `COMMERCE_TRACE_LLM_MODE` | `fake` | `fake` 或 `openai` |
-| `COMMERCE_TRACE_OPENAI_BASE_URL` | OpenAI API | OpenAI-compatible `/chat/completions` 基地址 |
-| `COMMERCE_TRACE_OPENAI_API_KEY` | 空 | 仅 `openai` 模式需要 |
-| `COMMERCE_TRACE_OPENAI_MODEL` | `gpt-4.1-mini` | 服务端可用模型名 |
+| `COMMERCE_TRACE_DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek OpenAI-compatible API 基地址 |
+| `COMMERCE_TRACE_DEEPSEEK_API_KEY` | 空 | 启动应用必填；只保存在本地 `.env` |
+| `COMMERCE_TRACE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek Tool Calling 模型 |
 | `COMMERCE_TRACE_COOKIE_SECURE` | `false` | HTTPS 部署时设为 `true` |
 
 更多后端配置及预算上限见 `backend/src/commerce_trace/config.py`。不要提交真实密钥；`.env` 已被 Git 忽略。
@@ -145,7 +146,7 @@ UV_CACHE_DIR=/tmp/commerce-trace-uv-cache \
 uv run pytest -p pytest_asyncio.plugin tests ../data_generator/test_generate.py
 ```
 
-普通测试使用 Fake LLM；SQLite 集成测试会在 pytest 临时目录中创建一次性数据库，不需要网络、数据库服务或真实模型密钥。真实模型或真实 Embedding 测试分别标记为 `model`、`embedding`。
+普通测试注入确定性的 `ScriptedLlm` 测试替身；它不会进入应用运行时。SQLite 集成测试会在 pytest 临时目录中创建一次性数据库，不需要网络、数据库服务或真实模型密钥。真实模型或真实 Embedding 测试分别标记为 `model`、`embedding`。
 
 ## 评测、记忆回放与实验
 
@@ -166,7 +167,7 @@ UV_CACHE_DIR=/tmp/commerce-trace-uv-cache uv run --project backend \
 UV_CACHE_DIR=/tmp/commerce-trace-uv-cache uv run --project backend commerce-trace ablation
 ```
 
-评测报告包含总体与分类通过率、归因通过率、首次 SQL 成功率、自我修正率、澄清准确率、危险请求拦截率、Evidence 引用完整率、调用次数、延迟以及模型返回的 Token 用量。Fake LLM 评测主要验证公开行为与执行链路；Golden 结果哈希和植入场景断言才是正式正确性标签。README 不预先宣称准确率、延迟或记忆提升，实际结果以每次生成的报告为准。
+评测报告包含总体与分类通过率、归因通过率、首次 SQL 成功率、自我修正率、澄清准确率、危险请求拦截率、Evidence 引用完整率、调用次数、延迟以及模型返回的 Token 用量。评测默认调用所配置的 DeepSeek 模型，可能产生 API 费用；Golden 结果哈希和植入场景断言才是正式正确性标签。README 不预先宣称准确率、延迟或记忆提升，实际结果以每次生成的报告为准。
 
 `knowledge/golden_sql/` 中缺少 `expected.value` 的 Case 会在回放报告中明确标为 `skipped`，不会借助运行时结果自动晋升 Candidate。
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,10 +16,9 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     database_path: Path = Path("data/commerce_trace.db")
-    llm_mode: Literal["fake", "openai"] = "fake"
-    openai_base_url: str = "https://api.openai.com/v1"
-    openai_api_key: str | None = None
-    openai_model: str = "gpt-4.1-mini"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_api_key: SecretStr | None = None
+    deepseek_model: str = "deepseek-v4-flash"
     cookie_name: str = "commerce_trace_user"
     cookie_secure: bool = False
     statement_timeout_ms: int = Field(default=5_000, ge=100, le=60_000)
