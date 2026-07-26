@@ -16,8 +16,6 @@ def utc_now() -> datetime:
 class EventType(str, Enum):
     CONVERSATION_STARTED = "conversation.started"
     CONTEXT_RETRIEVED = "context.retrieved"
-    PLAN_CREATED = "plan.created"
-    PLAN_STEP_STARTED = "plan.step_started"
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"
@@ -89,12 +87,6 @@ class LlmResponse(BaseModel):
     content: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
-
-
-class PlanStep(BaseModel):
-    id: str
-    title: str
-    status: Literal["pending", "in_progress", "completed", "failed"] = "pending"
 
 
 class Evidence(BaseModel):

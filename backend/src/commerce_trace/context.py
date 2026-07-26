@@ -9,8 +9,6 @@ from typing import Any, Protocol
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
-from .memory import MemorySearchResult, MemoryService
-
 SCHEMA_CATALOG: dict[str, Any] = {
     "version": "1.0.0",
     "schema": "ecommerce",
@@ -107,6 +105,37 @@ def schema_fingerprint(catalog: dict[str, Any] = SCHEMA_CATALOG) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def load_golden_examples(root: Path | None = None) -> list[dict[str, str]]:
+    """Load golden SQL YAML files as few-shot examples for the system prompt."""
+    examples: list[dict[str, str]] = []
+    if root is None or not root.exists():
+        return examples
+    golden_dir = root / "golden_sql"
+    if not golden_dir.exists():
+        return examples
+    for path in sorted(golden_dir.glob("*.yaml")):
+        item: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
+        examples.append({
+            "question": str(item["question"]),
+            "sql": str(item["sql"]),
+        })
+    return examples
+
+
+def format_golden_examples(examples: list[dict[str, str]]) -> str:
+    """Render golden examples as a few-shot section for the system prompt."""
+    if not examples:
+        return ""
+    lines = ["## 参考 SQL 示例"]
+    for index, example in enumerate(examples, start=1):
+        lines.append(f"### 示例 {index}：{example['question']}")
+        lines.append("```sql")
+        lines.append(example["sql"].strip())
+        lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
 class RetrievedContext(BaseModel):
     schema_catalog: dict[str, Any]
     schema_fingerprint: str
@@ -114,26 +143,21 @@ class RetrievedContext(BaseModel):
     knowledge_version: str
     rules: list[dict[str, Any]] = Field(default_factory=list)
     metrics: list[dict[str, Any]] = Field(default_factory=list)
-    memories: list[MemorySearchResult] = Field(default_factory=list)
+    golden_examples: list[dict[str, str]] = Field(default_factory=list)
     degraded: bool = False
 
     def prompt_section(self) -> str:
-        memories = [
-            {
-                "label": item.label,
-                "question": item.record.question,
-                "sql": item.record.normalized_sql,
-            }
-            for item in self.memories
-        ]
         payload = {
             "schema": self.schema_catalog,
             "schema_fingerprint": self.schema_fingerprint,
             "business_rules": self.rules,
             "metrics": self.metrics,
-            "retrieved_memory": memories,
         }
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        section = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        few_shot = format_golden_examples(self.golden_examples)
+        if few_shot:
+            section += "\n\n" + few_shot
+        return section
 
 
 class KnowledgeLoader:
@@ -182,17 +206,15 @@ class StaticSchemaProvider:
 class ContextAssembler:
     def __init__(
         self,
-        memory: MemoryService,
         knowledge_loader: KnowledgeLoader | None = None,
         *,
         include_knowledge: bool = True,
-        include_memory: bool = True,
+        include_golden_examples: bool = True,
         schema_provider: SchemaProvider | None = None,
     ) -> None:
-        self.memory = memory
         self.knowledge_loader = knowledge_loader or KnowledgeLoader()
         self.include_knowledge = include_knowledge
-        self.include_memory = include_memory
+        self.include_golden_examples = include_golden_examples
         self.schema_provider = schema_provider or StaticSchemaProvider()
 
     async def assemble(self, question: str) -> RetrievedContext:
@@ -201,13 +223,9 @@ class ContextAssembler:
             rules, metrics, knowledge_version = self.knowledge_loader.load()
         else:
             rules, metrics, knowledge_version = [], [], "disabled"
-        degraded = False
-        memories: list[MemorySearchResult] = []
-        if self.include_memory:
-            try:
-                memories = await self.memory.search(question, limit_candidates=2)
-            except Exception:
-                degraded = True
+        golden_examples: list[dict[str, str]] = []
+        if self.include_golden_examples and self.knowledge_loader.root is not None:
+            golden_examples = load_golden_examples(self.knowledge_loader.root)
         return RetrievedContext(
             schema_catalog=schema_catalog,
             schema_fingerprint=schema_fingerprint(schema_catalog),
@@ -215,6 +233,5 @@ class ContextAssembler:
             knowledge_version=knowledge_version,
             rules=rules,
             metrics=metrics,
-            memories=memories,
-            degraded=degraded,
+            golden_examples=golden_examples,
         )

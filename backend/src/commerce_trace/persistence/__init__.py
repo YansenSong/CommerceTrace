@@ -8,17 +8,15 @@ from .sqlite import (
     connect_sqlite,
     database_files,
 )
-from .store import ConversationLedger, InMemoryStore, MemoryRepository, Store
+from .store import ConversationLedger, InMemoryStore
 
 __all__ = [
     "ConversationLedger",
     "InMemoryStore",
-    "MemoryRepository",
     "SQLiteResources",
     "SQLiteSchemaProvider",
     "SQLiteSqlExecutor",
     "SQLiteStore",
-    "Store",
     "connect_sqlite",
     "database_files",
 ]

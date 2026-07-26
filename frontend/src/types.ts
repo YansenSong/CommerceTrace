@@ -1,8 +1,6 @@
 export type EventName =
   | 'conversation.started'
   | 'context.retrieved'
-  | 'plan.created'
-  | 'plan.step_started'
   | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'
@@ -26,12 +24,6 @@ export interface Message {
   requestId: string
   role: 'user' | 'assistant'
   content: string
-}
-
-export interface PlanStep {
-  id: string
-  title: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed'
 }
 
 export interface ToolState {
@@ -79,7 +71,6 @@ export interface ChatState {
   conversationId?: string
   requestId?: string
   messages: Message[]
-  plan: PlanStep[]
   tools: ToolState[]
   evidence: Evidence[]
   charts: Chart[]

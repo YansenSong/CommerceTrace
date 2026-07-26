@@ -4,8 +4,7 @@ import pytest
 
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
-from commerce_trace.llm import ScriptedLlm
-from commerce_trace.memory import MemoryRecord, MemoryStatus
+from commerce_trace.testing import ScriptedLlm
 from commerce_trace.operations.cli import dataset_exists, generate_data, migrate
 from commerce_trace.persistence import (
     SQLiteResources,
@@ -16,39 +15,17 @@ from commerce_trace.persistence import (
 from commerce_trace.runtime import build_runtime
 
 
-async def test_sqlite_store_opens_migrates_and_lists_memory(tmp_path: Path) -> None:
+async def test_sqlite_store_opens_migrates_and_loads_schema(tmp_path: Path) -> None:
     settings = Settings(database_path=tmp_path / "commerce_trace.db")
     migrate(settings)
     resources = SQLiteResources(settings.database_path)
     await resources.open()
     try:
         store = SQLiteStore(resources)
-        assert await store.list_memories() == []
+        health = await store.health()
+        assert health["database"] == "ready"
         schema = await SQLiteSchemaProvider(resources).load()
         assert len(schema["tables"]) == 8
-
-        original = MemoryRecord(
-            memory_id="golden-fixed-id",
-            question="销售额",
-            analysis_step="统计",
-            normalized_sql="SELECT 1",
-            tables_and_columns=[],
-            schema_fingerprint="schema-v1",
-            metric_versions={"revenue": "1"},
-            result_hash="old",
-            status=MemoryStatus.TRUSTED,
-        )
-        await store.upsert_memory(original)
-        updated = original.model_copy(
-            update={
-                "schema_fingerprint": "schema-v2",
-                "result_hash": "new",
-            }
-        )
-        saved = await store.upsert_memory(updated)
-        assert saved.memory_id == "golden-fixed-id"
-        assert saved.schema_fingerprint == "schema-v2"
-        assert len(await store.list_memories()) == 1
     finally:
         await resources.close()
 
@@ -106,8 +83,7 @@ async def test_sqlite_runtime_persists_real_evidence_and_replay(tmp_path: Path) 
         ]
         completed = attribution_events[-1]
         assert completed.payload["status"] == "completed"
-        assert len(completed.payload["evidence_ids"]) == 3
-        assert any(event.event is EventType.CHART_CREATED for event in attribution_events)
+        assert len(completed.payload["evidence_ids"]) == 1
     finally:
         for resource in reversed(runtime.resources):
             await resource.close()

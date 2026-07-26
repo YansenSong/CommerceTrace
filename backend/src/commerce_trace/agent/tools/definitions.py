@@ -9,7 +9,6 @@ from typing import Any, Generic, Protocol, TypeVar
 from pydantic import BaseModel, Field
 
 from ...contracts import Chart, ToolFailure, ToolResult, ToolSchema, ToolSuccess
-from ...memory import MemoryService
 from ...sql_safety import SqlSafetyError, SqlSafetyPolicy
 
 
@@ -26,10 +25,6 @@ class VisualizeDataArgs(BaseModel):
     x: str | None = None
     y: str | None = None
     value: str | None = None
-
-
-class SearchMemoryArgs(BaseModel):
-    query: str = Field(min_length=1, max_length=1_000)
 
 
 class SqlExecutor(Protocol):
@@ -227,27 +222,3 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
         )
 
 
-class SearchMemoryTool(Tool[SearchMemoryArgs]):
-    name = "search_memory"
-    description = "按原始问题和当前步骤检索业务规则与工具经验"
-    args_model = SearchMemoryArgs
-
-    def __init__(self, memory: MemoryService) -> None:
-        self.memory = memory
-
-    async def execute(self, context: ToolExecutionContext, args: SearchMemoryArgs) -> ToolResult:
-        results = await self.memory.search(args.query, limit_candidates=2)
-        data = [
-            {
-                "memory_id": result.record.memory_id,
-                "label": result.label,
-                "question": result.record.question,
-                "sql": result.record.normalized_sql,
-                "score": result.score,
-            }
-            for result in results
-        ]
-        return ToolSuccess(
-            data={"results": data},
-            summary_for_llm=json.dumps(data, ensure_ascii=False),
-        )

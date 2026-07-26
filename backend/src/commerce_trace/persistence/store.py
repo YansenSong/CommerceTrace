@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import Any, Protocol
 
 from ..contracts import Chart, Evidence, StreamEvent, utc_now
-from ..memory import MemoryRecord, MemoryStatus
 
 
 class ConversationLedger(Protocol):
@@ -56,20 +55,6 @@ class ConversationLedger(Protocol):
     ) -> dict[str, Any] | None: ...
 
 
-class MemoryRepository(Protocol):
-    async def upsert_memory(self, record: MemoryRecord) -> MemoryRecord: ...
-
-    async def list_memories(
-        self, statuses: set[MemoryStatus] | None = None
-    ) -> list[MemoryRecord]: ...
-
-    async def clear_candidates(self) -> int: ...
-
-
-class Store(ConversationLedger, MemoryRepository, Protocol):
-    """Composite adapter contract used only during runtime assembly."""
-
-
 class InMemoryStore:
     def __init__(self) -> None:
         self.users: set[str] = set()
@@ -80,9 +65,6 @@ class InMemoryStore:
         self.charts: dict[str, list[Chart]] = defaultdict(list)
         self.tool_calls: dict[str, dict[str, Any]] = {}
         self.tool_results: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self.memories: dict[str, MemoryRecord] = {}
-        self._memory_dedupe: dict[str, str] = {}
-        self._lock = asyncio.Lock()
 
     async def health(self) -> dict[str, Any]:
         return {"database": "ready", "backend": "ready"}
@@ -204,36 +186,3 @@ class InMemoryStore:
             "evidence": [item.model_dump(mode="json") for item in self.evidence[conversation_id]],
             "charts": [item.model_dump(mode="json") for item in self.charts[conversation_id]],
         }
-
-    async def upsert_memory(self, record: MemoryRecord) -> MemoryRecord:
-        async with self._lock:
-            existing_id = self._memory_dedupe.get(record.dedupe_key)
-            if existing_id and existing_id != record.memory_id:
-                existing = self.memories[existing_id]
-                existing.last_verified_at = record.last_verified_at or utc_now()
-                if record.status is not MemoryStatus.CANDIDATE:
-                    existing.status = record.status
-                return deepcopy(existing)
-            previous = self.memories.get(record.memory_id)
-            if previous is not None:
-                self._memory_dedupe.pop(previous.dedupe_key, None)
-            self.memories[record.memory_id] = deepcopy(record)
-            self._memory_dedupe[record.dedupe_key] = record.memory_id
-            return deepcopy(record)
-
-    async def list_memories(self, statuses: set[MemoryStatus] | None = None) -> list[MemoryRecord]:
-        records = list(self.memories.values())
-        if statuses is not None:
-            records = [record for record in records if record.status in statuses]
-        return deepcopy(records)
-
-    async def clear_candidates(self) -> int:
-        candidate_ids = [
-            memory_id
-            for memory_id, record in self.memories.items()
-            if record.status is MemoryStatus.CANDIDATE
-        ]
-        for memory_id in candidate_ids:
-            record = self.memories.pop(memory_id)
-            self._memory_dedupe.pop(record.dedupe_key, None)
-        return len(candidate_ids)

@@ -5,11 +5,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from ...contracts import ToolFailure, ToolResult, ToolSchema
-from ...memory import MemoryService
 from ...sql_safety import SqlSafetyPolicy
 from .definitions import (
     RunSqlTool,
-    SearchMemoryTool,
     SqlExecutor,
     Tool,
     ToolExecutionContext,
@@ -62,11 +60,9 @@ class ToolRegistry:
 
 def build_default_registry(
     executor: SqlExecutor,
-    memory: MemoryService,
     policy: SqlSafetyPolicy | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(RunSqlTool(executor=executor, policy=policy))
     registry.register(VisualizeDataTool())
-    registry.register(SearchMemoryTool(memory))
     return registry

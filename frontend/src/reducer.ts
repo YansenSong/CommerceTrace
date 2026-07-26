@@ -3,14 +3,12 @@ import type {
   ChatState,
   Evidence,
   Message,
-  PlanStep,
   StreamEvent,
   ToolState,
 } from './types'
 
 export const initialState: ChatState = {
   messages: [],
-  plan: [],
   tools: [],
   evidence: [],
   charts: [],
@@ -82,22 +80,6 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
           ? '核心 Schema 已加载，记忆检索已降级'
           : 'Schema 与业务上下文已加载',
       }
-    case 'plan.created':
-      return {
-        ...base,
-        plan: event.payload.steps as PlanStep[],
-        statusMessage: '分析计划已创建',
-      }
-    case 'plan.step_started': {
-      const step = event.payload.step as PlanStep
-      return {
-        ...base,
-        plan: state.plan.map((item) =>
-          item.id === step.id ? { ...item, status: 'in_progress' } : item,
-        ),
-        statusMessage: step.title,
-      }
-    }
     case 'tool.started':
       return {
         ...base,
@@ -183,9 +165,6 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
     case 'answer.completed':
       return {
         ...base,
-        plan: state.plan.map((step) =>
-          step.status === 'in_progress' ? { ...step, status: 'completed' } : step,
-        ),
         status:
           event.payload.status === 'partial'
             ? 'partial'

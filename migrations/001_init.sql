@@ -151,24 +151,3 @@ CREATE TABLE IF NOT EXISTS agent_app.charts (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS agent_app.memory_records (
-    memory_id TEXT PRIMARY KEY,
-    dedupe_key TEXT NOT NULL UNIQUE,
-    question TEXT NOT NULL,
-    analysis_step TEXT NOT NULL,
-    normalized_sql TEXT NOT NULL,
-    tables_and_columns TEXT NOT NULL,
-    schema_fingerprint TEXT NOT NULL,
-    metric_versions TEXT NOT NULL,
-    execution_time_ms REAL NOT NULL DEFAULT 0,
-    row_count INTEGER NOT NULL DEFAULT 0,
-    column_names TEXT NOT NULL,
-    limited_summary TEXT NOT NULL,
-    result_hash TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('candidate', 'trusted', 'stale', 'rejected')),
-    source TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    last_verified_at TEXT
-);
-CREATE INDEX IF NOT EXISTS agent_app.memory_records_status_idx
-    ON memory_records (status, created_at DESC);

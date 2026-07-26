@@ -11,7 +11,6 @@ from typing import Any, Protocol, TypeVar, cast
 
 from ..context import SCHEMA_CATALOG
 from ..contracts import Chart, EventType, Evidence, StreamEvent
-from ..memory import MemoryRecord, MemoryStatus
 
 ResultT = TypeVar("ResultT")
 
@@ -70,10 +69,6 @@ class SQLiteResources:
             return operation(self.connection)
 
 
-class IndexHealth(Protocol):
-    async def status(self) -> str: ...
-
-
 class SQLiteSchemaProvider:
     def __init__(self, resources: SQLiteResources) -> None:
         self.resources = resources
@@ -99,45 +94,27 @@ class SQLiteSchemaProvider:
 
 
 class SQLiteStore:
-    def __init__(
-        self,
-        resources: SQLiteResources,
-        index_health: IndexHealth | None = None,
-    ) -> None:
+    def __init__(self, resources: SQLiteResources) -> None:
         self.resources = resources
-        self.index_health = index_health
 
     async def health(self) -> dict[str, Any]:
         try:
 
-            def operation(connection: sqlite3.Connection) -> tuple[bool, bool]:
+            def operation(connection: sqlite3.Connection) -> bool:
                 dataset = connection.execute(
                     "SELECT EXISTS (SELECT 1 FROM ecommerce.orders)"
                 ).fetchone()[0]
-                knowledge = connection.execute(
-                    """
-                    SELECT EXISTS (
-                      SELECT 1 FROM agent_app.memory_records WHERE status = 'trusted'
-                    )
-                    """
-                ).fetchone()[0]
-                return bool(dataset), bool(knowledge)
+                return bool(dataset)
 
-            dataset_ready, knowledge_ready = await self.resources.run(operation)
+            dataset_ready = await self.resources.run(operation)
             return {
                 "database": "ready",
                 "dataset": "ready" if dataset_ready else "missing",
-                "knowledge": "ready" if knowledge_ready else "missing",
-                "derived_index": (
-                    await self.index_health.status() if self.index_health is not None else "ready"
-                ),
             }
         except Exception:
             return {
                 "database": "unavailable",
                 "dataset": "unknown",
-                "knowledge": "unknown",
-                "derived_index": "unknown",
             }
 
     async def ensure_user(self, user_id: str) -> None:
@@ -518,149 +495,6 @@ class SQLiteStore:
 
         return await self.resources.run(operation)
 
-    async def upsert_memory(self, record: MemoryRecord) -> MemoryRecord:
-        def operation(connection: sqlite3.Connection) -> MemoryRecord:
-            existing = connection.execute(
-                """
-                SELECT memory_id, status, last_verified_at
-                FROM agent_app.memory_records WHERE dedupe_key = ?
-                """,
-                (record.dedupe_key,),
-            ).fetchone()
-            if existing is not None:
-                status = (
-                    existing["status"]
-                    if record.status is MemoryStatus.CANDIDATE
-                    else record.status.value
-                )
-                connection.execute(
-                    """
-                    UPDATE agent_app.memory_records
-                    SET status = ?, last_verified_at = COALESCE(?, last_verified_at)
-                    WHERE dedupe_key = ?
-                    """,
-                    (
-                        status,
-                        record.last_verified_at.isoformat() if record.last_verified_at else None,
-                        record.dedupe_key,
-                    ),
-                )
-                memory_id = str(existing["memory_id"])
-            else:
-                memory_id = record.memory_id
-                existing_by_id = connection.execute(
-                    """
-                    SELECT 1 FROM agent_app.memory_records WHERE memory_id = ?
-                    """,
-                    (record.memory_id,),
-                ).fetchone()
-                values = (
-                    record.dedupe_key,
-                    record.question,
-                    record.analysis_step,
-                    record.normalized_sql,
-                    json.dumps(record.tables_and_columns, ensure_ascii=False),
-                    record.schema_fingerprint,
-                    json.dumps(record.metric_versions, ensure_ascii=False),
-                    record.execution_time_ms,
-                    record.row_count,
-                    json.dumps(record.column_names, ensure_ascii=False),
-                    record.limited_summary,
-                    record.result_hash,
-                    record.status.value,
-                    record.source,
-                    record.created_at.isoformat(),
-                    record.last_verified_at.isoformat() if record.last_verified_at else None,
-                )
-                if existing_by_id is not None:
-                    connection.execute(
-                        """
-                        UPDATE agent_app.memory_records SET
-                          dedupe_key = ?, question = ?, analysis_step = ?,
-                          normalized_sql = ?, tables_and_columns = ?,
-                          schema_fingerprint = ?, metric_versions = ?,
-                          execution_time_ms = ?, row_count = ?, column_names = ?,
-                          limited_summary = ?, result_hash = ?, status = ?,
-                          source = ?, created_at = ?, last_verified_at = ?
-                        WHERE memory_id = ?
-                        """,
-                        (*values, record.memory_id),
-                    )
-                else:
-                    connection.execute(
-                        """
-                        INSERT INTO agent_app.memory_records
-                          (memory_id, dedupe_key, question, analysis_step, normalized_sql,
-                           tables_and_columns, schema_fingerprint, metric_versions,
-                           execution_time_ms, row_count, column_names, limited_summary,
-                           result_hash, status, source, created_at, last_verified_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            record.memory_id,
-                            *values,
-                        ),
-                    )
-            connection.commit()
-            row = connection.execute(
-                "SELECT * FROM agent_app.memory_records WHERE memory_id = ?",
-                (memory_id,),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("memory upsert returned no row")
-            return self._memory_from_row(dict(row))
-
-        return await self.resources.run(operation)
-
-    async def list_memories(self, statuses: set[MemoryStatus] | None = None) -> list[MemoryRecord]:
-        def operation(connection: sqlite3.Connection) -> list[MemoryRecord]:
-            if statuses:
-                placeholders = ", ".join("?" for _ in statuses)
-                rows = connection.execute(
-                    f"""
-                    SELECT * FROM agent_app.memory_records
-                    WHERE status IN ({placeholders}) ORDER BY created_at
-                    """,
-                    tuple(status.value for status in statuses),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT * FROM agent_app.memory_records ORDER BY created_at"
-                ).fetchall()
-            return [self._memory_from_row(dict(row)) for row in rows]
-
-        return await self.resources.run(operation)
-
-    async def clear_candidates(self) -> int:
-        def operation(connection: sqlite3.Connection) -> int:
-            cursor = connection.execute(
-                "DELETE FROM agent_app.memory_records WHERE status = 'candidate'"
-            )
-            connection.commit()
-            return max(0, cursor.rowcount)
-
-        return await self.resources.run(operation)
-
-    @staticmethod
-    def _memory_from_row(row: dict[str, Any]) -> MemoryRecord:
-        return MemoryRecord(
-            memory_id=row["memory_id"],
-            question=row["question"],
-            analysis_step=row["analysis_step"],
-            normalized_sql=row["normalized_sql"],
-            tables_and_columns=json.loads(row["tables_and_columns"]),
-            schema_fingerprint=row["schema_fingerprint"],
-            metric_versions=json.loads(row["metric_versions"]),
-            execution_time_ms=float(row["execution_time_ms"]),
-            row_count=int(row["row_count"]),
-            column_names=json.loads(row["column_names"]),
-            limited_summary=row["limited_summary"],
-            result_hash=row["result_hash"],
-            status=MemoryStatus(row["status"]),
-            source=row["source"],
-            created_at=row["created_at"],
-            last_verified_at=row["last_verified_at"],
-        )
 
 
 class SQLiteSqlExecutor:

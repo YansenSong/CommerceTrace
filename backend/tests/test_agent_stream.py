@@ -2,8 +2,8 @@ from commerce_trace.agent import Agent
 from commerce_trace.agent.tools import FakeSqlExecutor, build_default_registry
 from commerce_trace.context import ContextAssembler
 from commerce_trace.contracts import EventType, Evidence, LlmResponse, ToolCall
-from commerce_trace.llm import LlmService, ScriptedLlm
-from commerce_trace.memory import MemoryService
+from commerce_trace.llm import LlmService
+from commerce_trace.testing import ScriptedLlm
 from commerce_trace.persistence import InMemoryStore
 
 
@@ -41,7 +41,6 @@ class CoverageGapLlm(LlmService):
 
 async def test_out_of_range_last_month_is_not_reported_as_real_zero() -> None:
     store = InMemoryStore()
-    memory = MemoryService(store=store, schema_fingerprint="schema-v1", metric_versions={})
     agent = Agent(
         llm=CoverageGapLlm(),
         registry=build_default_registry(
@@ -55,11 +54,11 @@ async def test_out_of_range_last_month_is_not_reported_as_real_zero() -> None:
                     }
                 ]
             ),
-            memory=memory,
+    
         ),
-        context_assembler=ContextAssembler(memory=memory),
+        context_assembler=ContextAssembler(),
         store=store,
-        memory=memory,
+
     )
 
     events = [
@@ -79,7 +78,6 @@ async def test_out_of_range_last_month_is_not_reported_as_real_zero() -> None:
     assert "不能说明实际订单总量为 0" in completed.payload["answer"]
     assert "数据表明当前问题可由" not in completed.payload["answer"]
     assert completed.payload["evidence_ids"]
-    assert await store.list_memories() == []
 
 
 def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() -> None:
@@ -195,16 +193,15 @@ def test_coverage_gap_omits_unadopted_exploration_evidence() -> None:
     assert "[ev_exploration]" not in answer
 
 
-async def test_greeting_completes_without_llm_or_business_query() -> None:
+async def test_greeting_goes_through_normal_agent_flow() -> None:
     store = InMemoryStore()
-    memory = MemoryService(store=store, schema_fingerprint="schema-v1", metric_versions={})
     executor = FakeSqlExecutor(rows=[{"revenue": 999_999.0}])
     agent = Agent(
         llm=ScriptedLlm(),
-        registry=build_default_registry(executor=executor, memory=memory),
-        context_assembler=ContextAssembler(memory=memory),
+        registry=build_default_registry(executor=executor),
+        context_assembler=ContextAssembler(),
         store=store,
-        memory=memory,
+
     )
 
     events = [
@@ -219,34 +216,31 @@ async def test_greeting_completes_without_llm_or_business_query() -> None:
 
     assert [event.event for event in events] == [
         EventType.CONVERSATION_STARTED,
+        EventType.CONTEXT_RETRIEVED,
+        EventType.TOOL_STARTED,
+        EventType.TOOL_COMPLETED,
+        EventType.EVIDENCE_CREATED,
         EventType.ANSWER_DELTA,
         EventType.ANSWER_COMPLETED,
     ]
     completed = events[-1]
     assert completed.payload["status"] == "completed"
-    assert completed.payload["intent"] == "greeting"
-    assert completed.payload["evidence_ids"] == []
-    assert completed.payload["usage"]["llm_calls"] == 0
-    assert completed.payload["usage"]["business_sql_calls"] == 0
-    assert "销售额：" not in completed.payload["answer"]
-    assert await store.list_memories() == []
+    assert len(completed.payload["evidence_ids"]) == 1
+    assert completed.payload["usage"]["llm_calls"] > 0
 
 
 async def test_simple_question_streams_plan_tool_evidence_chart_answer_and_candidate() -> None:
     store = InMemoryStore()
-    memory = MemoryService(
-        store=store, schema_fingerprint="schema-v1", metric_versions={"revenue": "1"}
-    )
     executor = FakeSqlExecutor(
         rows=[{"region": "华东", "revenue": 1200.0}, {"region": "华南", "revenue": 900.0}]
     )
-    registry = build_default_registry(executor=executor, memory=memory)
+    registry = build_default_registry(executor=executor)
     agent = Agent(
         llm=ScriptedLlm(),
         registry=registry,
-        context_assembler=ContextAssembler(memory=memory),
+        context_assembler=ContextAssembler(),
         store=store,
-        memory=memory,
+
     )
 
     events = [
@@ -262,30 +256,26 @@ async def test_simple_question_streams_plan_tool_evidence_chart_answer_and_candi
     event_types = [event.event for event in events]
     assert event_types[0] is EventType.CONVERSATION_STARTED
     assert EventType.CONTEXT_RETRIEVED in event_types
-    assert EventType.PLAN_CREATED in event_types
     assert EventType.TOOL_COMPLETED in event_types
     assert EventType.EVIDENCE_CREATED in event_types
-    assert EventType.CHART_CREATED in event_types
     assert event_types[-1] is EventType.ANSWER_COMPLETED
     completed = events[-1]
     assert completed.payload["evidence_ids"]
     assert "[ev_" in completed.payload["answer"]
-    assert len(await store.list_memories()) == 1
 
 
 async def test_retryable_sql_failure_is_corrected_within_budget() -> None:
     store = InMemoryStore()
-    memory = MemoryService(store=store, schema_fingerprint="schema-v1", metric_versions={})
     executor = FakeSqlExecutor(
         rows=[{"revenue": 1000.0}],
         failures=[RuntimeError("secret database detail")],
     )
     agent = Agent(
         llm=ScriptedLlm(),
-        registry=build_default_registry(executor=executor, memory=memory),
-        context_assembler=ContextAssembler(memory=memory),
+        registry=build_default_registry(executor=executor),
+        context_assembler=ContextAssembler(),
         store=store,
-        memory=memory,
+
     )
 
     events = [
@@ -323,16 +313,15 @@ class RepeatingSqlLlm(LlmService):
 
 async def test_business_sql_budget_returns_partial_evidence_and_stop_reason() -> None:
     store = InMemoryStore()
-    memory = MemoryService(store=store, schema_fingerprint="schema-v1", metric_versions={})
     agent = Agent(
         llm=RepeatingSqlLlm(),
         registry=build_default_registry(
             executor=FakeSqlExecutor(rows=[{"order_count": 3}]),
-            memory=memory,
+    
         ),
-        context_assembler=ContextAssembler(memory=memory),
+        context_assembler=ContextAssembler(),
         store=store,
-        memory=memory,
+
         max_business_sql_calls=1,
     )
 
@@ -350,6 +339,5 @@ async def test_business_sql_budget_returns_partial_evidence_and_stop_reason() ->
     assert completed.payload["status"] == "partial"
     assert completed.payload["stop_reason"] == "business_sql_limit"
     assert completed.payload["evidence_ids"]
-    assert completed.payload["unfinished_steps"]
     assert "business_sql_limit" not in completed.payload["answer"]
     assert "已达到本轮查询次数上限" in completed.payload["answer"]

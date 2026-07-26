@@ -5,14 +5,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..context import RetrievedContext
-from ..contracts import Chart, Evidence, LlmMessage, PlanStep
+from ..contracts import Chart, Evidence, LlmMessage
 from .tools import ToolExecutionContext
 
 
 class RequestPhase(str, Enum):
     STARTED = "started"
     CONTEXT_READY = "context_ready"
-    PLANNED = "planned"
     EXECUTING = "executing"
     SYNTHESIZING = "synthesizing"
     COMPLETED = "completed"
@@ -30,8 +29,7 @@ _ALLOWED_TRANSITIONS: dict[RequestPhase, set[RequestPhase]] = {
         RequestPhase.CLARIFICATION_REQUIRED,
         RequestPhase.FAILED,
     },
-    RequestPhase.CONTEXT_READY: {RequestPhase.PLANNED, RequestPhase.FAILED},
-    RequestPhase.PLANNED: {RequestPhase.EXECUTING, RequestPhase.FAILED},
+    RequestPhase.CONTEXT_READY: {RequestPhase.EXECUTING, RequestPhase.FAILED},
     RequestPhase.EXECUTING: {RequestPhase.SYNTHESIZING, RequestPhase.FAILED},
     RequestPhase.SYNTHESIZING: {
         RequestPhase.COMPLETED,
@@ -54,7 +52,6 @@ class RequestState:
     question: str
     phase: RequestPhase = RequestPhase.STARTED
     retrieved: RetrievedContext | None = None
-    plan: list[PlanStep] = field(default_factory=list)
     messages: list[LlmMessage] = field(default_factory=list)
     tool_context: ToolExecutionContext | None = None
     evidence: list[Evidence] = field(default_factory=list)
@@ -62,7 +59,6 @@ class RequestState:
     retry_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     incomplete_reason: str | None = None
     llm_content: str = ""
-    current_step_index: int = 0
     tool_iterations: int = 0
     sql_calls: int = 0
     llm_calls: int = 0
@@ -80,31 +76,14 @@ class RequestState:
         self.transition_to(RequestPhase.CONTEXT_READY)
         self.retrieved = retrieved
 
-    def set_plan(self, plan: list[PlanStep]) -> None:
-        self.transition_to(RequestPhase.PLANNED)
-        self.plan = plan
+    def prepare_execution(self) -> None:
+        self.transition_to(RequestPhase.EXECUTING)
         self.messages = [LlmMessage(role="user", content=self.question)]
         self.tool_context = ToolExecutionContext(
             user_id=self.user_id,
             conversation_id=self.conversation_id,
             request_id=self.request_id,
         )
-
-    def begin_execution(self) -> None:
-        self.transition_to(RequestPhase.EXECUTING)
-
-    def begin_current_step(self) -> PlanStep | None:
-        if self.current_step_index >= len(self.plan):
-            return None
-        step = self.plan[self.current_step_index]
-        step.status = "in_progress"
-        return step
-
-    def complete_current_step(self) -> None:
-        if self.current_step_index >= len(self.plan):
-            return
-        self.plan[self.current_step_index].status = "completed"
-        self.current_step_index += 1
 
     def record_llm_usage(self, usage: dict[str, int]) -> None:
         self.llm_calls += 1
@@ -158,31 +137,11 @@ class RequestState:
             raise ValueError(f"{terminal_phase.value} is not a terminal request phase")
         self.transition_to(terminal_phase)
 
-    def unfinished_steps(self) -> list[dict[str, object]]:
-        unfinished = [
-            step.model_dump() for step in self.plan if step.status not in {"completed"}
-        ]
-        if self.incomplete_reason and not unfinished:
-            if self.incomplete_reason == "insufficient_evidence":
-                title = "补充可执行证据"
-            elif self.incomplete_reason == "data_coverage_gap":
-                title = "补充目标时间范围的数据"
-            else:
-                title = "预算之外的后续探索"
-            unfinished = [{"id": "budget-stop", "title": title, "status": "pending"}]
-        return unfinished
-
-    def usage(self, candidate_adopted: int = 0) -> dict[str, int]:
-        memories = self.retrieved.memories if self.retrieved is not None else []
+    def usage(self) -> dict[str, int]:
         return {
             "tool_iterations": self.tool_iterations,
             "business_sql_calls": self.sql_calls,
             "llm_calls": self.llm_calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "trusted_recalled": sum(item.label == "trusted" for item in memories),
-            "candidate_recalled": sum(
-                item.label == "unverified_candidate" for item in memories
-            ),
-            "candidate_adopted": candidate_adopted,
         }

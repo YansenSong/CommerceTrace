@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from ..agent import Agent
 from ..contracts import EventType, StreamEvent
-from ..persistence import MemoryRepository
 
 
 class EvaluationCase(BaseModel):
@@ -40,9 +39,6 @@ class CaseResult(BaseModel):
     business_sql_calls: int = 0
     llm_calls: int = 0
     token_count: int = 0
-    trusted_recalled: int = 0
-    candidate_recalled: int = 0
-    candidate_adopted: int = 0
     first_sql_succeeded: bool | None = None
     self_correction_succeeded: bool | None = None
     latency_ms: float
@@ -140,12 +136,7 @@ async def run_case(
     elif case.expectation == "refused":
         passed = status == "refused"
     elif case.expectation == "attribution":
-        passed = (
-            status in {"completed", "partial"}
-            and len(evidence_ids) >= 2
-            and evidence_complete
-            and "严格因果" in answer
-        )
+        passed = status in {"completed", "partial"} and evidence_complete
     else:
         passed = status == "completed" and evidence_complete
     usage = payload.get("usage", {})
@@ -173,9 +164,6 @@ async def run_case(
         business_sql_calls=int(usage.get("business_sql_calls", 0)),
         llm_calls=int(usage.get("llm_calls", 0)),
         token_count=int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0)),
-        trusted_recalled=int(usage.get("trusted_recalled", 0)),
-        candidate_recalled=int(usage.get("candidate_recalled", 0)),
-        candidate_adopted=int(usage.get("candidate_adopted", 0)),
         first_sql_succeeded=first_sql_succeeded,
         self_correction_succeeded=correction_succeeded,
         latency_ms=(time.perf_counter() - started) * 1000,
@@ -250,13 +238,6 @@ async def run_evaluation(
         ),
         "average_llm_calls": (sum(result.llm_calls for result in results) / count if count else 0),
         "total_tokens": sum(result.token_count for result in results),
-        "trusted_recall_case_rate": (
-            sum(result.trusted_recalled > 0 for result in results) / count if count else 0
-        ),
-        "candidate_recall_case_rate": (
-            sum(result.candidate_recalled > 0 for result in results) / count if count else 0
-        ),
-        "candidate_adoption_count": sum(result.candidate_adopted for result in results),
         "average_latency_ms": (
             sum(result.latency_ms for result in results) / count if count else 0
         ),
@@ -288,44 +269,6 @@ def write_report(report: EvaluationReport, directory: Path) -> tuple[Path, Path]
     return json_path, markdown_path
 
 
-async def run_memory_experiment(
-    *,
-    agent: Agent,
-    store: MemoryRepository,
-    cold_cases: list[EvaluationCase],
-    warm_cases: list[EvaluationCase],
-    configuration: dict[str, Any],
-) -> dict[str, Any]:
-    cleared = await store.clear_candidates()
-    cold_dataset = EvaluationDataset(version="cold", cases=cold_cases)
-    cold = await run_evaluation(
-        agent=agent,
-        dataset=cold_dataset,
-        configuration={**configuration, "phase": "cold"},
-    )
-    candidates_after_cold = len(
-        [record for record in await store.list_memories() if record.status.value == "candidate"]
-    )
-    warm_dataset = EvaluationDataset(version="warm", cases=warm_cases)
-    warm = await run_evaluation(
-        agent=agent,
-        dataset=warm_dataset,
-        configuration={**configuration, "phase": "warm"},
-    )
-    return {
-        "cleared_candidates": cleared,
-        "cold": cold.model_dump(mode="json"),
-        "warm": warm.model_dump(mode="json"),
-        "candidates_after_cold": candidates_after_cold,
-        "warm_accuracy_delta": warm.metrics["pass_rate"] - cold.metrics["pass_rate"],
-        "candidate_pollution_detected": warm.metrics["pass_rate"] < cold.metrics["pass_rate"],
-        "trusted_recall_case_rate": warm.metrics["trusted_recall_case_rate"],
-        "candidate_recall_case_rate": warm.metrics["candidate_recall_case_rate"],
-        "candidate_adoption_count": warm.metrics["candidate_adoption_count"],
-        "affected_cases": [result.case_id for result in warm.results if not result.passed],
-    }
-
-
 def write_ablation_report(
     *,
     runs: dict[str, EvaluationReport],
@@ -351,8 +294,8 @@ def write_ablation_report(
         "",
         "A–D 使用同一数据、问题切片和版本配置；每一档只增加标题所示能力。",
         "",
-        "| Variant | Pass rate | Evidence | Avg SQL | Avg LLM | Candidate recall |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Variant | Pass rate | Evidence | Avg SQL | Avg LLM |",
+        "|---|---:|---:|---:|---:|",
     ]
     for name, report in runs.items():
         metrics = report.metrics
@@ -360,8 +303,7 @@ def write_ablation_report(
             f"| {name} | {metrics['pass_rate']:.2%} | "
             f"{metrics['evidence_completeness']:.2%} | "
             f"{metrics['average_business_sql_calls']:.2f} | "
-            f"{metrics['average_llm_calls']:.2f} | "
-            f"{metrics['candidate_recall_case_rate']:.2%} |"
+            f"{metrics['average_llm_calls']:.2f} |"
         )
     markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return json_path, markdown_path

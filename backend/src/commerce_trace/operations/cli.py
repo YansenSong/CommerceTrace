@@ -12,26 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Settings
-from ..context import schema_fingerprint
-from ..memory import ChromaMemoryIndex, MemoryService, memory_report
-from ..memory.bootstrap import (
-    bootstrap_memory,
-    load_business_documents,
-)
-from ..memory.replay import load_golden_cases, replay_memories, write_replay_report
 from ..persistence import (
     SQLiteResources,
-    SQLiteSqlExecutor,
-    SQLiteStore,
     connect_sqlite,
 )
 from ..runtime import FeatureConfiguration, build_runtime
-from ..sql_safety import SqlSafetyPolicy
 from .evaluation import (
     EvaluationReport,
     load_dataset,
     run_evaluation,
-    run_memory_experiment,
     write_ablation_report,
     write_report,
 )
@@ -139,120 +128,8 @@ def dataset_exists(settings: Settings) -> bool:
     return bool(row and row[0])
 
 
-async def bootstrap_and_rebuild(settings: Settings, *, rebuild_index: bool) -> None:
-    resources = SQLiteResources(project_path(settings.database_path))
-    await resources.open()
-    try:
-        store = SQLiteStore(resources)
-        records = await bootstrap_memory(store, project_path(settings.knowledge_path))
-        print(json.dumps(memory_report(records), ensure_ascii=False, indent=2))
-        if rebuild_index:
-            index = optional_chroma_index(settings)
-            if index is None:
-                print(
-                    json.dumps(
-                        {
-                            "tool_memory_index": "sqlite_lexical_fallback",
-                            "business_memory_index": "disabled",
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                )
-                return
-            tool_count = await index.rebuild(await store.list_memories())
-            business_count = await index.rebuild_business(
-                load_business_documents(project_path(settings.knowledge_path))
-            )
-            print(
-                json.dumps(
-                    {
-                        "tool_memory_index": tool_count,
-                        "business_memory_index": business_count,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
-    finally:
-        await resources.close()
-
-
-async def rebuild_index(settings: Settings) -> None:
-    resources = SQLiteResources(project_path(settings.database_path))
-    await resources.open()
-    try:
-        store = SQLiteStore(resources)
-        index = optional_chroma_index(settings)
-        if index is None:
-            raise RuntimeError(
-                "ChromaDB is optional; run `uv sync --extra memory` before rebuilding it"
-            )
-        tool_count = await index.rebuild(await store.list_memories())
-        business_count = await index.rebuild_business(
-            load_business_documents(project_path(settings.knowledge_path))
-        )
-        print(
-            json.dumps(
-                {
-                    "tool_memory_index": tool_count,
-                    "business_memory_index": business_count,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    finally:
-        await resources.close()
-
-
-async def replay_memory(settings: Settings) -> None:
-    database_path = project_path(settings.database_path)
-    resources = SQLiteResources(database_path)
-    await resources.open()
-    try:
-        store = SQLiteStore(resources)
-        index = optional_chroma_index(settings)
-        service = MemoryService(
-            store=store,
-            schema_fingerprint=schema_fingerprint(),
-            metric_versions={"revenue": "1", "refund_rate": "1", "aov": "1"},
-            index=index,
-        )
-        report = await replay_memories(
-            service=service,
-            executor=SQLiteSqlExecutor(
-                database_path,
-                statement_timeout_ms=settings.statement_timeout_ms,
-            ),
-            policy=SqlSafetyPolicy(
-                max_rows=settings.max_result_rows,
-                max_distinct_values=settings.max_distinct_values,
-            ),
-            golden_cases=load_golden_cases(
-                project_path(settings.knowledge_path),
-                schema_fingerprint=service.schema_fingerprint,
-            ),
-        )
-        paths = write_replay_report(report, PROJECT_ROOT / "reports")
-        print("\n".join(str(path) for path in paths))
-    finally:
-        await resources.close()
-
-
 def project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
-
-
-def optional_chroma_index(settings: Settings) -> ChromaMemoryIndex | None:
-    try:
-        import chromadb  # type: ignore[import-not-found]  # noqa: F401
-    except ImportError:
-        return None
-    return ChromaMemoryIndex(
-        project_path(settings.chroma_path),
-        settings.embedding_model,
-    )
 
 
 async def evaluate(settings: Settings, *, limit: int | None) -> None:
@@ -280,83 +157,21 @@ async def evaluate(settings: Settings, *, limit: int | None) -> None:
             await resource.close()
 
 
-async def memory_experiment(settings: Settings, *, limit: int) -> None:
-    runtime = build_runtime(settings)
-    for resource in runtime.resources:
-        await resource.open()
-    try:
-        dataset = load_dataset(project_path(settings.eval_dataset_path))
-        base_cases = [case for case in dataset.cases if case.expectation == "evidence"][:limit]
-        warm_cases = [
-            case.model_copy(
-                update={
-                    "id": f"warm-{case.id}",
-                    "question": f"换一种说法，请分析：{case.question}",
-                }
-            )
-            for case in base_cases
-        ]
-        result = await run_memory_experiment(
-            agent=runtime.agent,
-            store=runtime.store,
-            cold_cases=base_cases,
-            warm_cases=warm_cases,
-            configuration={
-                "model_provider": "deepseek",
-                "model": settings.deepseek_model,
-                "schema_version": settings.schema_version,
-                "knowledge_version": settings.knowledge_version,
-                "data_seed": 20260725,
-            },
-        )
-        output = PROJECT_ROOT / "reports" / "memory-experiment.json"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        markdown = output.with_suffix(".md")
-        markdown.write_text(
-            "\n".join(
-                [
-                    "# CommerceTrace Candidate Cold/Warm Experiment",
-                    "",
-                    f"- Cold pass rate: {result['cold']['metrics']['pass_rate']:.2%}",
-                    f"- Warm pass rate: {result['warm']['metrics']['pass_rate']:.2%}",
-                    f"- Warm accuracy delta: {result['warm_accuracy_delta']:.2%}",
-                    f"- Candidate recall case rate: {result['candidate_recall_case_rate']:.2%}",
-                    f"- Candidate adoption count: {result['candidate_adoption_count']}",
-                    f"- Pollution detected: {result['candidate_pollution_detected']}",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        print(f"{output}\n{markdown}")
-    finally:
-        for resource in reversed(runtime.resources):
-            await resource.close()
-
-
 async def ablation(settings: Settings, *, limit: int | None) -> None:
     variants = {
         "A_schema_and_system_prompt": FeatureConfiguration(
             include_knowledge=False,
-            include_memory=False,
-            include_candidates=False,
+            include_golden_examples=False,
             enable_sql_retries=False,
-            record_candidates=False,
         ),
-        "B_business_rules_and_trusted_sql": FeatureConfiguration(
-            include_candidates=False,
+        "B_with_business_rules": FeatureConfiguration(
+            include_golden_examples=False,
             enable_sql_retries=False,
-            record_candidates=False,
         ),
-        "C_execution_feedback_and_correction": FeatureConfiguration(
-            include_candidates=False,
-            record_candidates=False,
+        "C_with_golden_examples": FeatureConfiguration(
+            enable_sql_retries=False,
         ),
-        "D_candidate_continuous_memory": FeatureConfiguration(),
+        "D_execution_feedback_and_correction": FeatureConfiguration(),
     }
     dataset = load_dataset(project_path(settings.eval_dataset_path))
     runs: dict[str, EvaluationReport] = {}
@@ -365,8 +180,6 @@ async def ablation(settings: Settings, *, limit: int | None) -> None:
         for resource in runtime.resources:
             await resource.open()
         try:
-            if not runs:
-                await runtime.store.clear_candidates()
             runs[name] = await run_evaluation(
                 agent=runtime.agent,
                 dataset=dataset,
@@ -406,19 +219,8 @@ def parser() -> argparse.ArgumentParser:
         "generate-data", help="Generate and load fixed-seed ecommerce data"
     )
     generate_parser.add_argument("--profile", choices=["test", "demo"], default="test")
-    commands.add_parser("bootstrap-memory", help="Load Golden memory from knowledge files")
-    commands.add_parser(
-        "rebuild-memory-index", help="Rebuild both Chroma collections from authorities"
-    )
-    commands.add_parser(
-        "replay-memory", help="Replay Candidate memory against versioned Golden cases"
-    )
     evaluate_parser = commands.add_parser("evaluate", help="Run the reproducible MVP evaluation")
     evaluate_parser.add_argument("--limit", type=int, default=None)
-    memory_parser = commands.add_parser(
-        "memory-experiment", help="Run Candidate Cold/Warm experiment"
-    )
-    memory_parser.add_argument("--limit", type=int, default=10)
     ablation_parser = commands.add_parser(
         "ablation", help="Run reproducible A-D architecture ablations"
     )
@@ -426,40 +228,29 @@ def parser() -> argparse.ArgumentParser:
     init_parser = commands.add_parser("init", help="Initialize a clean CommerceTrace environment")
     init_parser.add_argument("--profile", choices=["test", "demo"], default="test")
     init_parser.add_argument(
-        "--if-empty",
-        action="store_true",
-        help="Preserve an already generated dataset",
+        "--no-data", action="store_true", help="Skip data generation"
     )
     return root
 
 
-def main() -> None:
+async def main() -> None:
     args = parser().parse_args()
     settings = Settings()
     if args.command == "migrate":
         migrate(settings)
     elif args.command == "generate-data":
-        generate_data(settings, args.profile)
-    elif args.command == "bootstrap-memory":
-        asyncio.run(bootstrap_and_rebuild(settings, rebuild_index=False))
-    elif args.command == "rebuild-memory-index":
-        asyncio.run(rebuild_index(settings))
-    elif args.command == "replay-memory":
-        asyncio.run(replay_memory(settings))
+        migrate(settings)
+        generate_data(settings, profile=args.profile)
     elif args.command == "evaluate":
-        asyncio.run(evaluate(settings, limit=args.limit))
-    elif args.command == "memory-experiment":
-        asyncio.run(memory_experiment(settings, limit=args.limit))
+        await evaluate(settings, limit=args.limit)
     elif args.command == "ablation":
-        asyncio.run(ablation(settings, limit=args.limit))
+        await ablation(settings, limit=args.limit)
     elif args.command == "init":
         migrate(settings)
-        if not args.if_empty or not dataset_exists(settings):
-            generate_data(settings, args.profile)
-        asyncio.run(bootstrap_and_rebuild(settings, rebuild_index=True))
+        if not args.no_data:
+            generate_data(settings, profile=args.profile)
+            print("Environment initialized with data.")
+        else:
+            print("Environment initialized without data.")
     else:
-        raise AssertionError(f"unhandled command: {args.command}")
-
-
-if __name__ == "__main__":
-    main()
+        raise NotImplementedError(f"unknown command: {args.command}")

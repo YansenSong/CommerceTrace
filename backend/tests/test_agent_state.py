@@ -2,7 +2,7 @@ import pytest
 
 from commerce_trace.agent.state import RequestPhase, RequestState
 from commerce_trace.context import RetrievedContext
-from commerce_trace.contracts import Evidence, PlanStep
+from commerce_trace.contracts import Evidence
 
 
 def build_state() -> RequestState:
@@ -30,11 +30,10 @@ def test_request_state_enforces_phase_order() -> None:
         ValueError,
         match="invalid request phase transition: started -> executing",
     ):
-        state.begin_execution()
+        state.prepare_execution()
 
     state.set_context(build_context())
-    state.set_plan([PlanStep(id="step-1", title="执行经营指标查询")])
-    state.begin_execution()
+    state.prepare_execution()
     state.begin_synthesis()
     state.finish(RequestPhase.COMPLETED)
 
@@ -44,10 +43,8 @@ def test_request_state_enforces_phase_order() -> None:
 def test_request_state_owns_budget_and_evidence_progress() -> None:
     state = build_state()
     state.set_context(build_context())
-    state.set_plan([PlanStep(id="step-1", title="执行经营指标查询")])
-    state.begin_execution()
+    state.prepare_execution()
 
-    assert state.begin_current_step() is not None
     assert state.begin_tool(
         name="run_sql",
         purpose="按地区统计销售额",
@@ -58,7 +55,7 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
     state.add_evidence(
         Evidence(
             evidence_id="ev_regions",
-            analysis_step="执行经营指标查询",
+            analysis_step="按地区统计销售额",
             tool_call_id="call-1",
             claim="按地区统计销售额",
             sql="SELECT region FROM ecommerce.customers",
@@ -67,7 +64,6 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
             result_hash="hash-1",
         )
     )
-    state.complete_current_step()
 
     assert not state.begin_tool(
         name="run_sql",
@@ -80,4 +76,3 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
     assert state.tool_iterations == 1
     assert state.sql_calls == 1
     assert [item.evidence_id for item in state.evidence] == ["ev_regions"]
-    assert state.plan[0].status == "completed"

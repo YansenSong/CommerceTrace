@@ -796,36 +796,13 @@ export default function App() {
               </button>
             </div>
 
-            {state.plan.length === 0 ? (
+            {state.tools.length === 0 && state.evidence.length === 0 ? (
               <div className="trace-empty">
                 <span><Icon name="trace" size={22} /></span>
                 <h3>等待分析任务</h3>
-                <p>提交问题后，这里会展示查询计划与执行进度。</p>
+                <p>提交问题后，这里会展示工具调用与执行进度。</p>
               </div>
-            ) : (
-              <ol className="plan">
-                {state.plan.map((step, index) => (
-                  <li className={step.status} key={step.id}>
-                    <div className="plan-rail">
-                      <span>{step.status === 'completed' ? '✓' : index + 1}</span>
-                      <i />
-                    </div>
-                    <div>
-                      <strong>{step.title}</strong>
-                      <small>
-                        {step.status === 'completed'
-                          ? '已完成'
-                          : step.status === 'in_progress'
-                            ? '正在执行'
-                            : step.status === 'failed'
-                              ? '执行失败'
-                              : '等待执行'}
-                      </small>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
+            ) : null}
 
             {state.tools.length > 0 && (
               <section className="tool-section">

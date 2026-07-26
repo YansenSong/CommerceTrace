@@ -30,13 +30,6 @@ INCOMPLETE_REASON_MESSAGES = {
 }
 
 
-def is_attribution(question: str) -> bool:
-    return any(
-        marker in question
-        for marker in ("为什么", "原因", "驱动", "贡献", "主要来自", "相关因素")
-    )
-
-
 def incomplete_reason_message(incomplete_reason: str | None) -> str:
     if incomplete_reason is None:
         return ""
@@ -94,12 +87,7 @@ def synthesize(
                 + "\n".join(f"- {item.claim} [{item.evidence_id}]" for item in missing)
             )
     if "口径说明：" not in answer:
-        caveat = (
-            "以上为描述性分析，只表示主要相关因素或贡献，不代表严格因果。"
-            if is_attribution(question)
-            else "以上结论仅基于当前数据库覆盖范围和本次已执行查询。"
-        )
-        sections.append(f"口径说明：{caveat}")
+        sections.append("口径说明：以上结论仅基于当前数据库覆盖范围和本次已执行查询。")
     if incomplete_reason and incomplete_reason != "data_coverage_gap":
         sections.append(incomplete_reason_message(incomplete_reason))
     return "\n\n".join(sections)
