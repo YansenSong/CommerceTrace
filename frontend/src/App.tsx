@@ -1,8 +1,17 @@
-import { FormEvent, lazy, Suspense, useEffect, useReducer, useState } from 'react'
+import {
+  FormEvent,
+  lazy,
+  ReactNode,
+  Suspense,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
 
 import { listConversations, replayConversation, streamQuestion } from './api'
 import { chatReducer, initialState, replayEvents } from './reducer'
-import type { ConversationSummary } from './types'
+import type { Chart, ConversationSummary, Evidence } from './types'
 import './styles.css'
 
 const ChartView = lazy(async () => {
@@ -10,8 +19,386 @@ const ChartView = lazy(async () => {
   return { default: module.ChartView }
 })
 
+type IconName =
+  | 'arrow'
+  | 'chart'
+  | 'chevron'
+  | 'clock'
+  | 'close'
+  | 'database'
+  | 'menu'
+  | 'message'
+  | 'plus'
+  | 'send'
+  | 'spark'
+  | 'trace'
+
+function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
+  const paths: Record<IconName, ReactNode> = {
+    arrow: <path d="m9 18 6-6-6-6" />,
+    chart: (
+      <>
+        <path d="M3 3v18h18" />
+        <path d="m7 16 4-5 4 3 5-7" />
+      </>
+    ),
+    chevron: <path d="m9 18 6-6-6-6" />,
+    clock: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </>
+    ),
+    close: (
+      <>
+        <path d="m6 6 12 12" />
+        <path d="m18 6-12 12" />
+      </>
+    ),
+    database: (
+      <>
+        <ellipse cx="12" cy="5" rx="8" ry="3" />
+        <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5" />
+        <path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+      </>
+    ),
+    menu: (
+      <>
+        <path d="M4 7h16" />
+        <path d="M4 12h16" />
+        <path d="M4 17h16" />
+      </>
+    ),
+    message: (
+      <>
+        <path d="M20 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4Z" />
+        <path d="M8 9h8M8 13h5" />
+      </>
+    ),
+    plus: (
+      <>
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </>
+    ),
+    send: (
+      <>
+        <path d="m22 2-7 20-4-9-9-4Z" />
+        <path d="M22 2 11 13" />
+      </>
+    ),
+    spark: (
+      <>
+        <path d="m12 3 1.4 4.1L17.5 9l-4.1 1.9L12 15l-1.4-4.1L6.5 9l4.1-1.9Z" />
+        <path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z" />
+      </>
+    ),
+    trace: (
+      <>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="12" r="2" />
+        <circle cx="8" cy="19" r="2" />
+        <path d="M8 6h3a3 3 0 0 1 3 3v0a3 3 0 0 0 3 3M16.5 13.5l-7 4" />
+      </>
+    ),
+  }
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="icon"
+      fill="none"
+      height={size}
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8">
+        {paths[name]}
+      </g>
+    </svg>
+  )
+}
+
+function renderInline(text: string) {
+  const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`|\[?ev_[A-Za-z0-9_-]+\]?)/g
+  return text.split(tokenPattern).map((part, index) => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      return <strong key={`strong-${index}`}>{part.slice(2, -2)}</strong>
+    }
+    if (/^`[^`]+`$/.test(part)) {
+      return <code className="inline-code" key={`code-${index}`}>{part.slice(1, -1)}</code>
+    }
+    if (/^\[?ev_[A-Za-z0-9_-]+\]?$/.test(part)) {
+      return (
+        <code className="evidence-reference" key={`evidence-${index}`}>
+          {part.replace(/^\[/, '').replace(/\]$/, '')}
+        </code>
+      )
+    }
+    return part
+  })
+}
+
+function markdownLines(content: string) {
+  const sanitized = content.replace(
+    /!\[[^\]\n]*\]\(\s*chart_[A-Za-z0-9_-]+\s*\)/g,
+    '',
+  )
+  const lines = sanitized.replace(/\r\n?/g, '\n').split('\n')
+  return lines.filter((line, index) => {
+    if (line.trim()) return true
+    const previous = lines[index - 1]?.trim() ?? ''
+    const next = lines[index + 1]?.trim() ?? ''
+    return !(previous.startsWith('|') && next.startsWith('|'))
+  })
+}
+
+function tableCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function isTableDivider(line: string) {
+  const cells = tableCells(line)
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
+function isNumericCell(value: string) {
+  return /^[-+]?[\d,.]+(?:%|元|万|亿)?$/.test(value.replace(/\s/g, ''))
+}
+
+function MarkdownBlocks({ lines }: { lines: string[] }) {
+  const blocks: ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index].trim()
+    if (!line) {
+      index += 1
+      continue
+    }
+
+    if (
+      line.startsWith('|') &&
+      lines[index + 1]?.trim().startsWith('|') &&
+      isTableDivider(lines[index + 1])
+    ) {
+      const headers = tableCells(line)
+      const alignments = tableCells(lines[index + 1]).map((cell) =>
+        cell.endsWith(':') ? 'numeric' : '',
+      )
+      const rows: string[][] = []
+      index += 2
+      while (index < lines.length && lines[index].trim().startsWith('|')) {
+        rows.push(tableCells(lines[index]))
+        index += 1
+      }
+      blocks.push(
+        <div className="answer-table-wrap" key={`table-${index}`}>
+          <table className="answer-table">
+            <thead>
+              <tr>
+                {headers.map((header, columnIndex) => (
+                  <th className={alignments[columnIndex]} key={`${header}-${columnIndex}`}>
+                    {renderInline(header)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`}>
+                  {headers.map((_, columnIndex) => {
+                    const value = row[columnIndex] ?? ''
+                    const cellClass =
+                      alignments[columnIndex] || isNumericCell(value) ? 'numeric' : ''
+                    return (
+                      <td className={cellClass} key={`cell-${rowIndex}-${columnIndex}`}>
+                        {renderInline(value)}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+
+    const codeFence = line.match(/^```([A-Za-z0-9_-]*)/)
+    if (codeFence) {
+      const codeLines: string[] = []
+      index += 1
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index])
+        index += 1
+      }
+      index += 1
+      blocks.push(
+        <pre className="markdown-code" key={`code-block-${index}`}>
+          {codeFence[1] && <span>{codeFence[1]}</span>}
+          <code>{codeLines.join('\n')}</code>
+        </pre>,
+      )
+      continue
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      const HeadingTag = heading[1].length <= 2 ? 'h3' : 'h4'
+      blocks.push(
+        <HeadingTag className="markdown-heading" key={`heading-${index}`}>
+          {renderInline(heading[2])}
+        </HeadingTag>,
+      )
+      index += 1
+      continue
+    }
+
+    const method = line.match(/^\*\*口径说明\*\*[：:]\s*(.*)$/)
+    if (method) {
+      blocks.push(
+        <aside className="report-method" key={`report-method-${index}`}>
+          <strong>口径说明</strong>
+          <span>{renderInline(method[1])}</span>
+        </aside>,
+      )
+      index += 1
+      continue
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = []
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ''))
+        index += 1
+      }
+      blocks.push(
+        <ul className="markdown-list" key={`list-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`item-${itemIndex}`}>{renderInline(item)}</li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    const orderedItem = line.match(/^\d+[.)]\s+(.+)$/)
+    if (orderedItem) {
+      const items: string[] = []
+      while (index < lines.length) {
+        const item = lines[index].trim().match(/^\d+[.)]\s+(.+)$/)
+        if (!item) break
+        items.push(item[1])
+        index += 1
+      }
+      blocks.push(
+        <ol className="markdown-list" key={`ordered-list-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ordered-item-${itemIndex}`}>{renderInline(item)}</li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    blocks.push(
+      <p className="markdown-paragraph" key={`paragraph-${index}`}>
+        {renderInline(line)}
+      </p>,
+    )
+    index += 1
+  }
+
+  return <div className="markdown-blocks">{blocks}</div>
+}
+
+function sectionMarker(line: string, label: string) {
+  const value = line.trim().replace(/^#{1,4}\s*/, '')
+  return value === label || value === `${label}：` || value === `${label}:`
+}
+
+export function AssistantContent({ content }: { content: string }) {
+  let lines = markdownLines(content)
+  const firstContentIndex = lines.findIndex((line) => line.trim())
+  let hasConclusion = false
+
+  if (firstContentIndex >= 0) {
+    const firstLine = lines[firstContentIndex].trim()
+    const conclusionPrefix = firstLine.match(/^结论[：:]\s*(.*)$/)
+    if (conclusionPrefix) {
+      hasConclusion = true
+      lines =
+        conclusionPrefix[1]
+          ? lines.map((line, index) =>
+              index === firstContentIndex ? conclusionPrefix[1] : line,
+            )
+          : lines.filter((_, index) => index !== firstContentIndex)
+    }
+  }
+
+  if (lines.some((line) => sectionMarker(line, '结论'))) {
+    hasConclusion = true
+    lines = lines.filter((line) => !sectionMarker(line, '结论'))
+  }
+
+  const evidenceIndex = lines.findIndex((line) => sectionMarker(line, '证据'))
+  const methodIndex = lines.findIndex(
+    (line, index) => index > evidenceIndex && /^口径说明[：:]/.test(line.trim()),
+  )
+  const answerEnd =
+    evidenceIndex >= 0 ? evidenceIndex : methodIndex >= 0 ? methodIndex : lines.length
+  const answerLines = lines.slice(0, answerEnd)
+  const evidenceLines =
+    evidenceIndex >= 0
+      ? lines.slice(evidenceIndex + 1, methodIndex >= 0 ? methodIndex : lines.length)
+      : []
+  const methodText =
+    methodIndex >= 0 ? lines[methodIndex].trim().replace(/^口径说明[：:]\s*/, '') : ''
+
+  return (
+    <div className="answer-content">
+      {hasConclusion ? (
+        <section className="answer-report">
+          <span className="answer-label">结论</span>
+          <MarkdownBlocks lines={answerLines} />
+        </section>
+      ) : (
+        <MarkdownBlocks lines={answerLines} />
+      )}
+
+      {evidenceLines.some((line) => line.trim()) && (
+        <section className="answer-evidence">
+          <h3 className="answer-section-title">支撑证据</h3>
+          <MarkdownBlocks lines={evidenceLines} />
+        </section>
+      )}
+
+      {methodText && (
+        <aside className="method-note">
+          <strong>回答边界</strong>
+          <span>{renderInline(methodText)}</span>
+        </aside>
+      )}
+    </div>
+  )
+}
+
 function EvidenceTable({ rows }: { rows: Array<Record<string, unknown>> }) {
-  if (!rows.length) return <p className="muted">查询成功，未返回数据。</p>
+  if (!rows.length) {
+    return (
+      <div className="empty-table">
+        <Icon name="database" size={18} />
+        查询已执行，本次没有返回数据
+      </div>
+    )
+  }
   const columns = Object.keys(rows[0])
   return (
     <div className="table-wrap">
@@ -31,11 +418,100 @@ function EvidenceTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   )
 }
 
+function EvidenceSection({
+  evidence,
+  headingId,
+}: {
+  evidence: Evidence[]
+  headingId: string
+}) {
+  if (!evidence.length) return null
+
+  return (
+    <section className="evidence-section" aria-labelledby={headingId}>
+      <div className="section-heading">
+        <div>
+          <span className="section-icon"><Icon name="database" size={18} /></span>
+          <div>
+            <h2 id={headingId}>查询证据</h2>
+            <p>{evidence.length} 条已执行查询，可展开核验</p>
+          </div>
+        </div>
+        <span className="verified-badge">已验证</span>
+      </div>
+
+      <div className="evidence-list">
+        {evidence.map((item) => (
+          <details className="evidence-card" key={item.evidence_id}>
+            <summary>
+              <div className="evidence-summary">
+                <code>{item.evidence_id}</code>
+                <strong>{item.claim}</strong>
+                <span>
+                  {item.row_count} 行
+                  <i />
+                  {item.execution_time_ms.toFixed(1)} ms
+                </span>
+              </div>
+              <span className="detail-chevron"><Icon name="chevron" size={18} /></span>
+            </summary>
+            <div className="evidence-detail">
+              <EvidenceTable rows={item.preview} />
+              <details className="sql">
+                <summary>
+                  <span>查看只读 SQL</span>
+                  <Icon name="chevron" size={16} />
+                </summary>
+                <pre><code>{item.sql}</code></pre>
+              </details>
+              <div className="evidence-meta">
+                <span>结果哈希 {item.result_hash.slice(0, 12)}</span>
+                <span>执行于 {new Date(item.executed_at).toLocaleString('zh-CN')}</span>
+              </div>
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ChartCard({ chart }: { chart: Chart }) {
+  return (
+    <section className="chart-card">
+      <div className="chart-heading">
+        <span><Icon name="chart" size={18} /></span>
+        <div><h2>{chart.title}</h2><p>数据来源 {chart.evidence_id}</p></div>
+      </div>
+      <ChartView chart={chart} />
+    </section>
+  )
+}
+
+function formatHistoryDate(value: string) {
+  const date = new Date(value)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+}
+
+const suggestions = [
+  '上个月的订单总量是多少？',
+  '按地区展示销售额',
+  '最近三个月销售趋势如何？',
+]
+
 export default function App() {
   const [state, dispatch] = useReducer(chatReducer, initialState)
   const [question, setQuestion] = useState('')
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [traceOpen, setTraceOpen] = useState(false)
+  const conversationEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const refreshHistory = async () => {
     try {
@@ -48,6 +524,13 @@ export default function App() {
   useEffect(() => {
     void refreshHistory()
   }, [])
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({
+      behavior: state.status === 'working' ? 'smooth' : 'auto',
+      block: 'end',
+    })
+  }, [state.messages, state.evidence, state.status])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -81,125 +564,323 @@ export default function App() {
     }
   }
 
+  const startNewChat = () => {
+    dispatch({
+      type: 'hydrate',
+      state: { ...initialState, seenEventIds: new Set<string>() },
+    })
+    setQuestion('')
+    setSidebarOpen(false)
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
   const openConversation = async (conversationId: string) => {
     setLoadingHistory(true)
     try {
       const replay = await replayConversation(conversationId)
       const replayed = replayEvents(replay.events)
       dispatch({ type: 'hydrate', state: replayed })
+      setSidebarOpen(false)
     } finally {
       setLoadingHistory(false)
     }
   }
 
+  const askSuggestion = (suggestion: string) => {
+    setQuestion(suggestion)
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const lastMessage = state.messages.at(-1)
+  const isWaitingForAnswer = state.status === 'working' && lastMessage?.role === 'user'
+
   return (
-    <div className="shell">
-      <aside>
-        <div className="brand">
-          <span className="brand-mark">商</span>
-          <div><strong>CommerceTrace</strong><small>证据驱动的经营分析</small></div>
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
+
+      <button
+        aria-label="关闭对话历史"
+        className={`drawer-scrim ${sidebarOpen ? 'is-visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
+        <div className="sidebar-top">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">商</span>
+            <div>
+              <strong>CommerceTrace</strong>
+              <small>商迹 · 经营分析智能体</small>
+            </div>
+          </div>
+          <button
+            aria-label="关闭对话历史"
+            className="icon-button sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <Icon name="close" />
+          </button>
         </div>
-        <button className="new-chat" onClick={() => window.location.reload()}>
-          ＋ 新建分析
+
+        <button className="new-chat" onClick={startNewChat}>
+          <Icon name="plus" size={18} />
+          <span>新建分析</span>
+          <kbd>⌘ K</kbd>
         </button>
-        <p className="eyebrow">历史对话</p>
-        <nav>
+
+        <div className="history-heading">
+          <span>历史对话</span>
+          <span>{conversations.length}</span>
+        </div>
+        <nav aria-label="历史对话">
+          {conversations.length === 0 && (
+            <div className="history-empty">
+              <Icon name="message" size={18} />
+              <span>完成一次分析后，对话会保存在这里</span>
+            </div>
+          )}
           {conversations.map((conversation) => (
             <button
               key={conversation.conversation_id}
+              aria-current={
+                state.conversationId === conversation.conversation_id ? 'page' : undefined
+              }
               className="history-item"
               disabled={loadingHistory}
               onClick={() => void openConversation(conversation.conversation_id)}
             >
               <span>{conversation.title}</span>
-              <time>{new Date(conversation.updated_at).toLocaleDateString('zh-CN')}</time>
+              <time dateTime={conversation.updated_at}>
+                {formatHistoryDate(conversation.updated_at)}
+              </time>
             </button>
           ))}
         </nav>
+
+        <div className="sidebar-foot">
+          <span className="privacy-icon"><Icon name="database" size={16} /></span>
+          <p><strong>本地数据连接</strong><small>只读查询 · 全程可追溯</small></p>
+        </div>
       </aside>
-      <main>
-        <header>
-          <div>
-            <p className="eyebrow">LIVE ANALYSIS</p>
-            <h1>中文电商经营分析</h1>
+
+      <main id="main-content">
+        <header className="topbar">
+          <div className="topbar-title">
+            <button
+              aria-label="打开对话历史"
+              className="icon-button menu-button"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Icon name="menu" />
+            </button>
+            <div>
+              <span className="mobile-brand">商迹</span>
+              <h1>{state.messages.length ? '经营分析对话' : '经营分析助手'}</h1>
+            </div>
           </div>
-          <div className={`status ${state.status}`}>
-            <span />{state.statusMessage}
+          <div className="topbar-actions">
+            <div className={`status ${state.status}`} role="status" aria-live="polite">
+              <span className="status-dot" />
+              <span>{state.statusMessage}</span>
+            </div>
+            <button
+              aria-label="查看分析轨迹"
+              aria-expanded={traceOpen}
+              className="icon-button trace-button"
+              onClick={() => setTraceOpen(true)}
+            >
+              <Icon name="trace" />
+            </button>
           </div>
         </header>
+
         <section className="workspace">
-          <div className="conversation">
+          <div className="conversation" aria-live="polite">
             {state.messages.length === 0 && (
               <div className="hero">
-                <p className="eyebrow">TRACE EVERY NUMBER</p>
-                <h2>让每个经营结论，都能回到证据。</h2>
-                <p>试试“七月销售额为什么下降？”或“按地区展示销售额”。</p>
+                <div className="hero-symbol" aria-hidden="true">
+                  <Icon name="spark" size={26} />
+                </div>
+                <p className="overline">EVIDENCE-FIRST ANALYTICS</p>
+                <h2>从经营问题出发，<br />让数据给出答案。</h2>
+                <p className="hero-copy">
+                  用自然语言询问订单、销售额和经营趋势。商迹会执行只读查询，
+                  并为每个结论保留可核验的证据。
+                </p>
+                <div className="suggestions" aria-label="推荐问题">
+                  {suggestions.map((suggestion) => (
+                    <button key={suggestion} onClick={() => askSuggestion(suggestion)}>
+                      <span>{suggestion}</span>
+                      <Icon name="arrow" size={17} />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
-            {state.messages.map((message) => (
-              <article key={message.id} className={`message ${message.role}`}>
-                <span>{message.role === 'user' ? '你' : '商迹'}</span>
-                <div>{message.content}</div>
-              </article>
-            ))}
-            {state.evidence.map((item) => (
-              <details className="evidence-card" key={item.evidence_id}>
-                <summary>
-                  <span>证据 {item.evidence_id}</span>
-                  <strong>{item.claim}</strong>
-                </summary>
-                <div className="evidence-meta">
-                  <span>{item.row_count} 行</span>
-                  <span>{item.execution_time_ms.toFixed(1)} ms</span>
-                  <span>Hash {item.result_hash.slice(0, 12)}</span>
+
+            <div className="message-list">
+              {state.messages.map((message) => {
+                const replyEvidence =
+                  message.role === 'assistant'
+                    ? state.evidence.filter((item) => item.requestId === message.requestId)
+                    : []
+                const replyCharts =
+                  message.role === 'assistant'
+                    ? state.charts.filter((item) => item.requestId === message.requestId)
+                    : []
+                const headingId = `evidence-${message.id}`
+
+                return (
+                  <article key={message.id} className={`message ${message.role}`}>
+                    <div className="message-identity">
+                      <span className="avatar" aria-hidden="true">
+                        {message.role === 'user' ? '你' : '商'}
+                      </span>
+                      <span>{message.role === 'user' ? '你' : '商迹'}</span>
+                    </div>
+                    <div className="message-body">
+                      {message.role === 'assistant' ? (
+                        <AssistantContent content={message.content} />
+                      ) : (
+                        <p>{message.content}</p>
+                      )}
+                    </div>
+                    {message.role === 'assistant' &&
+                      (replyEvidence.length > 0 || replyCharts.length > 0) && (
+                        <div className="message-artifacts">
+                          <EvidenceSection evidence={replyEvidence} headingId={headingId} />
+                          <Suspense
+                            fallback={<div className="chart-skeleton">正在准备可视化…</div>}
+                          >
+                            {replyCharts.map((chart) => (
+                              <ChartCard chart={chart} key={chart.chart_id} />
+                            ))}
+                          </Suspense>
+                        </div>
+                      )}
+                  </article>
+                )
+              })}
+
+              {isWaitingForAnswer && (
+                <div className="thinking" role="status">
+                  <span className="avatar" aria-hidden="true">商</span>
+                  <div>
+                    <span /><span /><span />
+                  </div>
+                  <p>{state.statusMessage}</p>
                 </div>
-                <EvidenceTable rows={item.preview} />
-                <details className="sql">
-                  <summary>查看只读 SQL</summary>
-                  <pre>{item.sql}</pre>
-                </details>
-              </details>
-            ))}
-            <Suspense fallback={<p className="muted">正在加载图表…</p>}>
-              {state.charts.map((chart) => <ChartView chart={chart} key={chart.chart_id} />)}
-            </Suspense>
-          </div>
-          <aside className="trace-panel">
-            <p className="eyebrow">分析轨迹</p>
-            <ol className="plan">
-              {state.plan.map((step) => (
-                <li className={step.status} key={step.id}>
-                  <i /> <span>{step.title}</span>
-                </li>
-              ))}
-            </ol>
-            {state.tools.length > 0 && <p className="eyebrow">工具状态</p>}
-            <div className="tools">
-              {state.tools.map((tool) => (
-                <details key={tool.toolCallId} className={`tool ${tool.status}`}>
-                  <summary><span>{tool.name}</span><b>{tool.status}</b></summary>
-                  {tool.error && <p>{tool.error}</p>}
-                </details>
-              ))}
+              )}
             </div>
+
+            <div ref={conversationEndRef} />
+          </div>
+
+          <button
+            aria-label="关闭分析轨迹"
+            className={`drawer-scrim trace-scrim ${traceOpen ? 'is-visible' : ''}`}
+            onClick={() => setTraceOpen(false)}
+          />
+          <aside className={`trace-panel ${traceOpen ? 'is-open' : ''}`} aria-label="分析轨迹">
+            <div className="trace-heading">
+              <div>
+                <span className="section-icon"><Icon name="trace" size={18} /></span>
+                <div><h2>分析轨迹</h2><p>实时查看 Agent 的执行过程</p></div>
+              </div>
+              <button
+                aria-label="关闭分析轨迹"
+                className="icon-button trace-close"
+                onClick={() => setTraceOpen(false)}
+              >
+                <Icon name="close" size={18} />
+              </button>
+            </div>
+
+            {state.plan.length === 0 ? (
+              <div className="trace-empty">
+                <span><Icon name="trace" size={22} /></span>
+                <h3>等待分析任务</h3>
+                <p>提交问题后，这里会展示查询计划与执行进度。</p>
+              </div>
+            ) : (
+              <ol className="plan">
+                {state.plan.map((step, index) => (
+                  <li className={step.status} key={step.id}>
+                    <div className="plan-rail">
+                      <span>{step.status === 'completed' ? '✓' : index + 1}</span>
+                      <i />
+                    </div>
+                    <div>
+                      <strong>{step.title}</strong>
+                      <small>
+                        {step.status === 'completed'
+                          ? '已完成'
+                          : step.status === 'in_progress'
+                            ? '正在执行'
+                            : step.status === 'failed'
+                              ? '执行失败'
+                              : '等待执行'}
+                      </small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+
+            {state.tools.length > 0 && (
+              <section className="tool-section">
+                <div className="trace-subheading">
+                  <span>工具调用</span>
+                  <span>{state.tools.length}</span>
+                </div>
+                <div className="tools">
+                  {state.tools.map((tool) => (
+                    <details key={tool.toolCallId} className={`tool ${tool.status}`}>
+                      <summary>
+                        <span className="tool-icon"><Icon name="database" size={15} /></span>
+                        <span>{tool.name}</span>
+                        <b>{tool.status === 'running' ? '运行中' : tool.status === 'completed' ? '完成' : '失败'}</b>
+                      </summary>
+                      {tool.error && <p>{tool.error}</p>}
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
           </aside>
         </section>
-        <form onSubmit={(event) => void submit(event)}>
-          <textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="输入一个中文经营问题…"
-            rows={2}
-            disabled={state.status === 'working'}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-          />
-          <button disabled={!question.trim() || state.status === 'working'}>开始分析</button>
-        </form>
+
+        <div className="composer-area">
+          <form onSubmit={(event) => void submit(event)}>
+            <label className="sr-only" htmlFor="question">输入经营分析问题</label>
+            <textarea
+              id="question"
+              ref={textareaRef}
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              placeholder="问一个关于订单、销售或经营趋势的问题…"
+              rows={1}
+              disabled={state.status === 'working'}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+            />
+            <button
+              aria-label={state.status === 'working' ? '正在分析' : '发送问题'}
+              className="submit-button"
+              disabled={!question.trim() || state.status === 'working'}
+            >
+              {state.status === 'working' ? <span className="button-spinner" /> : <Icon name="send" size={18} />}
+            </button>
+          </form>
+          <p className="composer-hint">
+            <span>Enter 发送 · Shift + Enter 换行</span>
+            <span>答案由查询结果生成，请以证据为准</span>
+          </p>
+        </div>
       </main>
     </div>
   )

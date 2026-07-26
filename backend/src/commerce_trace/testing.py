@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from .agent import Agent
+from .agent.tools import FakeSqlExecutor, build_default_registry
 from .context import ContextAssembler, schema_fingerprint
 from .llm import ScriptedLlm
 from .memory import MemoryService
-from .storage import InMemoryStore
-from .tools import FakeSqlExecutor, build_default_registry
+from .persistence import InMemoryStore
 
 
 def build_test_agent(store: InMemoryStore) -> Agent:

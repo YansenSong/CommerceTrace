@@ -12,14 +12,14 @@ from fastapi.responses import StreamingResponse
 from .agent import Agent
 from .config import Settings
 from .contracts import ChatRequest
-from .storage import InMemoryStore, Store
+from .persistence import ConversationLedger, InMemoryStore
 from .testing import build_test_agent
 
 
 def create_app(
     *,
     settings: Settings | None = None,
-    store: Store | None = None,
+    store: ConversationLedger | None = None,
     agent: Agent | None = None,
     resources: list[Any] | None = None,
 ) -> FastAPI:

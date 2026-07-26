@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from commerce_trace.cli import dataset_exists, generate_data, migrate
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
 from commerce_trace.llm import ScriptedLlm
 from commerce_trace.memory import MemoryRecord, MemoryStatus
-from commerce_trace.runtime import build_runtime
-from commerce_trace.sqlite import (
+from commerce_trace.operations.cli import dataset_exists, generate_data, migrate
+from commerce_trace.persistence import (
     SQLiteResources,
     SQLiteSchemaProvider,
     SQLiteSqlExecutor,
     SQLiteStore,
 )
+from commerce_trace.runtime import build_runtime
 
 
 async def test_sqlite_store_opens_migrates_and_lists_memory(tmp_path: Path) -> None:

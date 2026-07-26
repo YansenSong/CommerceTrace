@@ -1,10 +1,10 @@
 from commerce_trace.agent import Agent
+from commerce_trace.agent.tools import FakeSqlExecutor, build_default_registry
 from commerce_trace.context import ContextAssembler
 from commerce_trace.contracts import EventType, Evidence, LlmResponse, ToolCall
 from commerce_trace.llm import LlmService, ScriptedLlm
 from commerce_trace.memory import MemoryService
-from commerce_trace.storage import InMemoryStore
-from commerce_trace.tools import FakeSqlExecutor, build_default_registry
+from commerce_trace.persistence import InMemoryStore
 
 
 class CoverageGapLlm(LlmService):
@@ -105,6 +105,48 @@ def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() ->
     assert answer.startswith("结论：华东销售额最高，为 1200。[ev_known]")
     assert "[ev_unknown]" not in answer
     assert "数据表明当前问题可由" not in answer
+
+
+def test_synthesis_removes_chart_id_markdown_image_reference() -> None:
+    evidence = Evidence(
+        evidence_id="ev_regions",
+        analysis_step="按地区分析",
+        tool_call_id="call-regions",
+        claim="按地区统计销售额：region=西南，revenue=292422.49",
+        sql="SELECT region, SUM(total_amount) AS revenue FROM ecommerce.orders GROUP BY region",
+        columns=["region", "revenue"],
+        row_count=5,
+        result_hash="regions-hash",
+        preview=[{"region": "西南", "revenue": 292422.49}],
+    )
+
+    answer = Agent._synthesize(
+        "按地区展示销售额",
+        [evidence],
+        (
+            "各地区销售额排名如下。[ev_regions]\n\n"
+            "![各地区销售额对比](chart_b07c43a1d42b)"
+        ),
+        None,
+    )
+
+    assert "各地区销售额排名如下" in answer
+    assert "![各地区销售额对比]" not in answer
+    assert "chart_b07c43a1d42b" not in answer
+
+
+def test_synthesis_keeps_internal_incomplete_reason_out_of_answer() -> None:
+    answer = Agent._synthesize(
+        "分析一下销售情况",
+        [],
+        "",
+        "insufficient_evidence",
+    )
+
+    assert "insufficient_evidence" not in answer
+    assert "分析已停止" not in answer
+    assert "当前没有获得足够的可执行查询证据" in answer
+    assert "请补充时间范围或明确需要分析的指标" in answer
 
 
 def test_coverage_gap_omits_unadopted_exploration_evidence() -> None:
@@ -309,3 +351,5 @@ async def test_business_sql_budget_returns_partial_evidence_and_stop_reason() ->
     assert completed.payload["stop_reason"] == "business_sql_limit"
     assert completed.payload["evidence_ids"]
     assert completed.payload["unfinished_steps"]
+    assert "business_sql_limit" not in completed.payload["answer"]
+    assert "已达到本轮查询次数上限" in completed.payload["answer"]

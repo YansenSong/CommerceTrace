@@ -23,6 +23,7 @@ export interface StreamEvent {
 
 export interface Message {
   id: string
+  requestId: string
   role: 'user' | 'assistant'
   content: string
 }
@@ -42,6 +43,7 @@ export interface ToolState {
 }
 
 export interface Evidence {
+  requestId: string
   evidence_id: string
   analysis_step: string
   claim: string
@@ -55,6 +57,7 @@ export interface Evidence {
 }
 
 export interface Chart {
+  requestId: string
   chart_id: string
   evidence_id: string
   chart_type: 'metric_card' | 'bar' | 'line' | 'pie'

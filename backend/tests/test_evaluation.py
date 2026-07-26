@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from commerce_trace.evaluation import load_dataset, run_evaluation
-from commerce_trace.storage import InMemoryStore
+from commerce_trace.operations.evaluation import load_dataset, run_evaluation
+from commerce_trace.persistence import InMemoryStore
 from commerce_trace.testing import build_test_agent
 
 

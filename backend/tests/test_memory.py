@@ -7,7 +7,7 @@ from commerce_trace.memory import (
     MemoryStatus,
     transition_memory,
 )
-from commerce_trace.storage import InMemoryStore
+from commerce_trace.persistence import InMemoryStore
 
 
 async def test_only_final_evidence_creates_candidate_and_candidate_is_lower_rank() -> None:

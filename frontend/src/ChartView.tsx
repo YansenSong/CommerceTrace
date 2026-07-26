@@ -17,7 +17,11 @@ export function ChartView({ chart }: { chart: Chart }) {
         margin: { l: 48, r: 20, t: 52, b: 48 },
         paper_bgcolor: 'transparent',
         plot_bgcolor: 'transparent',
-        font: { family: 'Inter, "Noto Sans SC", sans-serif', color: '#dce8ee' },
+        font: {
+          family: '"Noto Sans SC", "PingFang SC", sans-serif',
+          color: '#4d5b68',
+        },
+        colorway: ['#0c5b4d', '#c76d36', '#56756b', '#d5a85c', '#5f7791'],
       },
       { responsive: true, displaylogo: false },
     )

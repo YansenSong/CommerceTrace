@@ -1,6 +1,6 @@
 from commerce_trace.context import ContextAssembler, schema_fingerprint
 from commerce_trace.memory import MemoryService
-from commerce_trace.storage import InMemoryStore
+from commerce_trace.persistence import InMemoryStore
 
 
 async def test_context_contains_complete_versioned_schema_before_model_use() -> None:

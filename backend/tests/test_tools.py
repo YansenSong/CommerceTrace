@@ -1,7 +1,11 @@
 import pytest
 
+from commerce_trace.agent.tools import (
+    ToolExecutionContext,
+    ToolRegistry,
+    VisualizeDataTool,
+)
 from commerce_trace.contracts import ToolFailure, ToolSuccess
-from commerce_trace.tools import ToolExecutionContext, VisualizeDataTool
 
 
 @pytest.mark.parametrize(
@@ -64,3 +68,24 @@ async def test_visualize_data_rejects_missing_evidence_and_fields() -> None:
 
     assert isinstance(missing, ToolFailure)
     assert missing.safe_error_code == "evidence_not_found"
+
+
+async def test_registry_owns_registration_and_argument_validation() -> None:
+    registry = ToolRegistry()
+    registry.register(VisualizeDataTool())
+
+    with pytest.raises(ValueError, match="duplicate tool: visualize_data"):
+        registry.register(VisualizeDataTool())
+
+    result = await registry.execute(
+        "visualize_data",
+        {"chart_type": "bar"},
+        ToolExecutionContext(
+            user_id="user",
+            conversation_id="conversation",
+            request_id="request",
+        ),
+    )
+
+    assert isinstance(result, ToolFailure)
+    assert result.safe_error_code == "invalid_tool_arguments"

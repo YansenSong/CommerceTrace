@@ -4,14 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .agent import Agent
+from .agent.tools import build_default_registry
 from .config import Settings
 from .context import ContextAssembler, KnowledgeLoader, schema_fingerprint
 from .llm import LlmService, OpenAICompatibleLlm
-from .memory import MemoryService
-from .memory_index import ChromaMemoryIndex
+from .memory import ChromaMemoryIndex, MemoryService
+from .persistence import SQLiteResources, SQLiteSchemaProvider, SQLiteSqlExecutor, SQLiteStore
 from .sql_safety import SqlSafetyPolicy
-from .sqlite import SQLiteResources, SQLiteSchemaProvider, SQLiteSqlExecutor, SQLiteStore
-from .tools import build_default_registry
 
 
 @dataclass

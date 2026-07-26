@@ -47,22 +47,33 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
   }
   switch (event.event) {
     case 'conversation.started':
+      {
+        const question = String(event.payload.question ?? '')
+        const last = state.messages.at(-1)
+        const messages: Message[] =
+          question && last?.role === 'user' && last.content === question
+            ? state.messages.map((message, index) =>
+                index === state.messages.length - 1
+                  ? { ...message, requestId: event.request_id }
+                  : message,
+              )
+            : question
+              ? [
+                  ...state.messages,
+                  {
+                    id: `user-${event.event_id}`,
+                    requestId: event.request_id,
+                    role: 'user',
+                    content: question,
+                  },
+                ]
+              : state.messages
       return {
         ...base,
-        messages:
-          event.payload.question &&
-          state.messages.at(-1)?.content !== String(event.payload.question)
-            ? [
-                ...state.messages,
-                {
-                  id: `user-${event.event_id}`,
-                  role: 'user',
-                  content: String(event.payload.question),
-                },
-              ]
-            : state.messages,
+        messages,
         status: 'working',
         statusMessage: '正在分析问题',
+      }
       }
     case 'context.retrieved':
       return {
@@ -129,18 +140,30 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
     case 'evidence.created':
       return {
         ...base,
-        evidence: [...state.evidence, event.payload as unknown as Evidence],
+        evidence: [
+          ...state.evidence,
+          {
+            ...(event.payload as unknown as Evidence),
+            requestId: event.request_id,
+          },
+        ],
       }
     case 'chart.created':
       return {
         ...base,
-        charts: [...state.charts, event.payload as unknown as Chart],
+        charts: [
+          ...state.charts,
+          {
+            ...(event.payload as unknown as Chart),
+            requestId: event.request_id,
+          },
+        ],
       }
     case 'answer.delta': {
       const last = state.messages.at(-1)
       const delta = String(event.payload.delta ?? '')
       const messages: Message[] =
-        last?.role === 'assistant'
+        last?.role === 'assistant' && last.requestId === event.request_id
           ? state.messages.map((message, index) =>
               index === state.messages.length - 1
                 ? { ...message, content: message.content + delta }
@@ -148,7 +171,12 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
             )
           : [
               ...state.messages,
-              { id: `assistant-${event.event_id}`, role: 'assistant', content: delta },
+              {
+                id: `assistant-${event.event_id}`,
+                requestId: event.request_id,
+                role: 'assistant',
+                content: delta,
+              },
             ]
       return { ...base, messages }
     }
@@ -181,7 +209,12 @@ export function addUserMessage(state: ChatState, content: string): ChatState {
     ...state,
     messages: [
       ...state.messages,
-      { id: `user-${crypto.randomUUID()}`, role: 'user', content },
+      {
+        id: `user-${crypto.randomUUID()}`,
+        requestId: '',
+        role: 'user',
+        content,
+      },
     ],
     status: 'working',
     statusMessage: '正在发送',

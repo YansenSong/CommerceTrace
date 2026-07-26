@@ -1,7 +1,7 @@
 from httpx import ASGITransport, AsyncClient
 
 from commerce_trace.api import create_app
-from commerce_trace.storage import InMemoryStore
+from commerce_trace.persistence import InMemoryStore
 from commerce_trace.testing import build_test_agent
 
 
