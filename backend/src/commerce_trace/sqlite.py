@@ -548,35 +548,59 @@ class SQLiteStore:
                 memory_id = str(existing["memory_id"])
             else:
                 memory_id = record.memory_id
-                connection.execute(
+                existing_by_id = connection.execute(
                     """
-                    INSERT INTO agent_app.memory_records
-                      (memory_id, dedupe_key, question, analysis_step, normalized_sql,
-                       tables_and_columns, schema_fingerprint, metric_versions,
-                       execution_time_ms, row_count, column_names, limited_summary,
-                       result_hash, status, source, created_at, last_verified_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    SELECT 1 FROM agent_app.memory_records WHERE memory_id = ?
                     """,
-                    (
-                        record.memory_id,
-                        record.dedupe_key,
-                        record.question,
-                        record.analysis_step,
-                        record.normalized_sql,
-                        json.dumps(record.tables_and_columns, ensure_ascii=False),
-                        record.schema_fingerprint,
-                        json.dumps(record.metric_versions, ensure_ascii=False),
-                        record.execution_time_ms,
-                        record.row_count,
-                        json.dumps(record.column_names, ensure_ascii=False),
-                        record.limited_summary,
-                        record.result_hash,
-                        record.status.value,
-                        record.source,
-                        record.created_at.isoformat(),
-                        record.last_verified_at.isoformat() if record.last_verified_at else None,
-                    ),
+                    (record.memory_id,),
+                ).fetchone()
+                values = (
+                    record.dedupe_key,
+                    record.question,
+                    record.analysis_step,
+                    record.normalized_sql,
+                    json.dumps(record.tables_and_columns, ensure_ascii=False),
+                    record.schema_fingerprint,
+                    json.dumps(record.metric_versions, ensure_ascii=False),
+                    record.execution_time_ms,
+                    record.row_count,
+                    json.dumps(record.column_names, ensure_ascii=False),
+                    record.limited_summary,
+                    record.result_hash,
+                    record.status.value,
+                    record.source,
+                    record.created_at.isoformat(),
+                    record.last_verified_at.isoformat() if record.last_verified_at else None,
                 )
+                if existing_by_id is not None:
+                    connection.execute(
+                        """
+                        UPDATE agent_app.memory_records SET
+                          dedupe_key = ?, question = ?, analysis_step = ?,
+                          normalized_sql = ?, tables_and_columns = ?,
+                          schema_fingerprint = ?, metric_versions = ?,
+                          execution_time_ms = ?, row_count = ?, column_names = ?,
+                          limited_summary = ?, result_hash = ?, status = ?,
+                          source = ?, created_at = ?, last_verified_at = ?
+                        WHERE memory_id = ?
+                        """,
+                        (*values, record.memory_id),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO agent_app.memory_records
+                          (memory_id, dedupe_key, question, analysis_step, normalized_sql,
+                           tables_and_columns, schema_fingerprint, metric_versions,
+                           execution_time_ms, row_count, column_names, limited_summary,
+                           result_hash, status, source, created_at, last_verified_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            record.memory_id,
+                            *values,
+                        ),
+                    )
             connection.commit()
             row = connection.execute(
                 "SELECT * FROM agent_app.memory_records WHERE memory_id = ?",

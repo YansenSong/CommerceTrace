@@ -5,6 +5,7 @@ import pytest
 from commerce_trace.cli import dataset_exists, generate_data, migrate
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
+from commerce_trace.memory import MemoryRecord, MemoryStatus
 from commerce_trace.runtime import build_runtime
 from commerce_trace.sqlite import (
     SQLiteResources,
@@ -24,6 +25,29 @@ async def test_sqlite_store_opens_migrates_and_lists_memory(tmp_path: Path) -> N
         assert await store.list_memories() == []
         schema = await SQLiteSchemaProvider(resources).load()
         assert len(schema["tables"]) == 8
+
+        original = MemoryRecord(
+            memory_id="golden-fixed-id",
+            question="销售额",
+            analysis_step="统计",
+            normalized_sql="SELECT 1",
+            tables_and_columns=[],
+            schema_fingerprint="schema-v1",
+            metric_versions={"revenue": "1"},
+            result_hash="old",
+            status=MemoryStatus.TRUSTED,
+        )
+        await store.upsert_memory(original)
+        updated = original.model_copy(
+            update={
+                "schema_fingerprint": "schema-v2",
+                "result_hash": "new",
+            }
+        )
+        saved = await store.upsert_memory(updated)
+        assert saved.memory_id == "golden-fixed-id"
+        assert saved.schema_fingerprint == "schema-v2"
+        assert len(await store.list_memories()) == 1
     finally:
         await resources.close()
 
@@ -65,9 +89,7 @@ async def test_sqlite_runtime_persists_real_evidence_and_replay(tmp_path: Path) 
         ]
         assert events[-1].event is EventType.ANSWER_COMPLETED
         assert events[-1].payload["status"] == "completed"
-        replay = await runtime.store.replay_conversation(
-            "sqlite-user", "sqlite-conversation"
-        )
+        replay = await runtime.store.replay_conversation("sqlite-user", "sqlite-conversation")
         assert replay is not None
         assert replay["evidence"]
         assert replay["tool_calls"]

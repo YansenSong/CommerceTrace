@@ -208,6 +208,9 @@ class InMemoryStore:
                 if record.status is not MemoryStatus.CANDIDATE:
                     existing.status = record.status
                 return deepcopy(existing)
+            previous = self.memories.get(record.memory_id)
+            if previous is not None:
+                self._memory_dedupe.pop(previous.dedupe_key, None)
             self.memories[record.memory_id] = deepcopy(record)
             self._memory_dedupe[record.dedupe_key] = record.memory_id
             return deepcopy(record)
