@@ -12,10 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Settings
-from ..persistence import (
-    SQLiteResources,
-    connect_sqlite,
-)
+from ..persistence import connect_sqlite
 from ..runtime import FeatureConfiguration, build_runtime
 from .evaluation import (
     EvaluationReport,

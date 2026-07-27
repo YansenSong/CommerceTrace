@@ -4,7 +4,6 @@ import pytest
 
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
-from commerce_trace.testing import ScriptedLlm
 from commerce_trace.operations.cli import dataset_exists, generate_data, migrate
 from commerce_trace.persistence import (
     SQLiteResources,
@@ -13,6 +12,7 @@ from commerce_trace.persistence import (
     SQLiteStore,
 )
 from commerce_trace.runtime import build_runtime
+from commerce_trace.testing import ScriptedLlm
 
 
 async def test_sqlite_store_opens_migrates_and_loads_schema(tmp_path: Path) -> None:

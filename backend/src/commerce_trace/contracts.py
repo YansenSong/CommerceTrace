@@ -63,7 +63,6 @@ class ToolSchema(BaseModel):
 class ToolSuccess(BaseModel):
     success: Literal[True] = True
     data: dict[str, Any]
-    summary_for_llm: str
 
 
 class ToolFailure(BaseModel):

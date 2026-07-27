@@ -17,11 +17,7 @@ from ..contracts import (
 from ..llm import LlmService
 from ..persistence import ConversationLedger
 from .state import RequestPhase, RequestState
-from .synthesis import (
-    incomplete_reason_message,
-    synthesize,
-    temporal_coverage_gap_conclusion,
-)
+from .synthesis import synthesize
 from .tools import ToolRegistry
 
 SYSTEM_PROMPT = """你是中文电商经营分析助手。
@@ -121,23 +117,8 @@ class Agent:
                 yield event
             return
 
-        if self._requires_clarification(question):
-            answer = "请确认销售额口径（成交额或扣除退款后的净销售额）以及比较时间范围。"
-            async for event in self._complete(
-                state,
-                answer,
-                RequestPhase.CLARIFICATION_REQUIRED,
-                {
-                    "answer": answer,
-                    "evidence_ids": [],
-                    "status": "clarification_required",
-                },
-            ):
-                yield event
-            return
-
         try:
-            retrieved = await self.context_assembler.assemble(question)
+            retrieved = await self.context_assembler.assemble()
         except Exception:
             state.finish(RequestPhase.FAILED)
             yield await self._make_event(
@@ -151,7 +132,7 @@ class Agent:
                 },
             )
             return
-        state.set_context(retrieved)
+        state.mark_context_ready()
         yield await self._make_event(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -298,7 +279,6 @@ class Agent:
                     )
                 elif call.name == "visualize_data":
                     chart = Chart.model_validate(result.data["chart"])
-                    state.add_chart(chart)
                     await self.store.save_chart(user_id, conversation_id, request_id, chart)
                     yield await self._make_event(
                         user_id=user_id,
@@ -330,15 +310,7 @@ class Agent:
             state.incomplete_reason = "tool_iteration_limit"
         if not state.evidence and not state.incomplete_reason:
             state.incomplete_reason = "insufficient_evidence"
-        if (
-            state.evidence
-            and not state.incomplete_reason
-            and temporal_coverage_gap_conclusion(question, state.evidence) is not None
-        ):
-            state.incomplete_reason = "data_coverage_gap"
-
         answer = synthesize(
-            question,
             state.evidence,
             state.llm_content,
             state.incomplete_reason,
@@ -385,17 +357,6 @@ class Agent:
             event=EventType.ANSWER_COMPLETED,
             payload=payload,
         )
-
-    @staticmethod
-    def _requires_clarification(question: str) -> bool:
-        vague = {
-            "销售额怎么样",
-            "销售额有变化吗",
-            "退款情况如何",
-            "比较一下销售额",
-            "最近表现好吗",
-        }
-        return question.strip("？?。 ") in vague
 
     @staticmethod
     def _is_unsafe_request(question: str) -> bool:
@@ -450,23 +411,3 @@ class Agent:
             execution_time_ms=data["execution_time_ms"],
             preview=preview,
         )
-
-    @staticmethod
-    def _synthesize(
-        question: str,
-        evidence: list[Evidence],
-        llm_content: str,
-        incomplete_reason: str | None,
-    ) -> str:
-        return synthesize(question, evidence, llm_content, incomplete_reason)
-
-    @staticmethod
-    def _incomplete_reason_message(incomplete_reason: str | None) -> str:
-        return incomplete_reason_message(incomplete_reason)
-
-    @staticmethod
-    def _temporal_coverage_gap_conclusion(
-        question: str,
-        evidence: list[Evidence],
-    ) -> str | None:
-        return temporal_coverage_gap_conclusion(question, evidence)

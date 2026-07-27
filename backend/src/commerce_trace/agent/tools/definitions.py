@@ -49,9 +49,6 @@ class FakeSqlExecutor:
 
 
 class ToolExecutionContext(BaseModel):
-    user_id: str
-    conversation_id: str
-    request_id: str
     query_results: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -121,20 +118,7 @@ class RunSqlTool(Tool[RunSqlArgs]):
         result_id = f"result_{result_hash[:12]}"
         context.query_results[result_id] = data
         data["result_id"] = result_id
-        return ToolSuccess(
-            data=data,
-            summary_for_llm=json.dumps(
-                {
-                    "result_id": result_id,
-                    "columns": columns,
-                    "row_count": len(rows),
-                    "preview": rows[:20],
-                    "result_hash": result_hash,
-                },
-                ensure_ascii=False,
-                default=str,
-            ),
-        )
+        return ToolSuccess(data=data)
 
 
 class VisualizeDataTool(Tool[VisualizeDataArgs]):
@@ -216,9 +200,6 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
             title=args.title,
             figure=figure,
         )
-        return ToolSuccess(
-            data={"chart": chart.model_dump(mode="json")},
-            summary_for_llm=f"图表已创建：{chart.chart_id}",
-        )
+        return ToolSuccess(data={"chart": chart.model_dump(mode="json")})
 
 

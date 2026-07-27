@@ -4,8 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..context import RetrievedContext
-from ..contracts import Chart, Evidence, LlmMessage
+from ..contracts import Evidence, LlmMessage
 from .tools import ToolExecutionContext
 
 
@@ -16,7 +15,6 @@ class RequestPhase(str, Enum):
     SYNTHESIZING = "synthesizing"
     COMPLETED = "completed"
     REFUSED = "refused"
-    CLARIFICATION_REQUIRED = "clarification_required"
     FAILED = "failed"
     INCOMPLETE = "incomplete"
 
@@ -26,7 +24,6 @@ _ALLOWED_TRANSITIONS: dict[RequestPhase, set[RequestPhase]] = {
         RequestPhase.CONTEXT_READY,
         RequestPhase.COMPLETED,
         RequestPhase.REFUSED,
-        RequestPhase.CLARIFICATION_REQUIRED,
         RequestPhase.FAILED,
     },
     RequestPhase.CONTEXT_READY: {RequestPhase.EXECUTING, RequestPhase.FAILED},
@@ -38,7 +35,6 @@ _ALLOWED_TRANSITIONS: dict[RequestPhase, set[RequestPhase]] = {
     },
     RequestPhase.COMPLETED: set(),
     RequestPhase.REFUSED: set(),
-    RequestPhase.CLARIFICATION_REQUIRED: set(),
     RequestPhase.FAILED: set(),
     RequestPhase.INCOMPLETE: set(),
 }
@@ -51,11 +47,9 @@ class RequestState:
     request_id: str
     question: str
     phase: RequestPhase = RequestPhase.STARTED
-    retrieved: RetrievedContext | None = None
     messages: list[LlmMessage] = field(default_factory=list)
     tool_context: ToolExecutionContext | None = None
     evidence: list[Evidence] = field(default_factory=list)
-    charts: list[Chart] = field(default_factory=list)
     retry_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     incomplete_reason: str | None = None
     llm_content: str = ""
@@ -72,18 +66,13 @@ class RequestState:
             )
         self.phase = target
 
-    def set_context(self, retrieved: RetrievedContext) -> None:
+    def mark_context_ready(self) -> None:
         self.transition_to(RequestPhase.CONTEXT_READY)
-        self.retrieved = retrieved
 
     def prepare_execution(self) -> None:
         self.transition_to(RequestPhase.EXECUTING)
         self.messages = [LlmMessage(role="user", content=self.question)]
-        self.tool_context = ToolExecutionContext(
-            user_id=self.user_id,
-            conversation_id=self.conversation_id,
-            request_id=self.request_id,
-        )
+        self.tool_context = ToolExecutionContext()
 
     def record_llm_usage(self, usage: dict[str, int]) -> None:
         self.llm_calls += 1
@@ -120,9 +109,6 @@ class RequestState:
     def add_evidence(self, evidence: Evidence) -> None:
         self.evidence.append(evidence)
 
-    def add_chart(self, chart: Chart) -> None:
-        self.charts.append(chart)
-
     def begin_synthesis(self) -> None:
         self.transition_to(RequestPhase.SYNTHESIZING)
 
@@ -130,7 +116,6 @@ class RequestState:
         if terminal_phase not in {
             RequestPhase.COMPLETED,
             RequestPhase.REFUSED,
-            RequestPhase.CLARIFICATION_REQUIRED,
             RequestPhase.FAILED,
             RequestPhase.INCOMPLETE,
         }:

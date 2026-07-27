@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 from ..context import SCHEMA_CATALOG
 from ..contracts import Chart, EventType, Evidence, StreamEvent

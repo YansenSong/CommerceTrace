@@ -22,9 +22,6 @@ async def test_visualize_data_supports_only_controlled_plotly_contracts(
     arguments: dict[str, str],
 ) -> None:
     context = ToolExecutionContext(
-        user_id="user",
-        conversation_id="conversation",
-        request_id="request",
         query_results={
             "result-1": {
                 "evidence_id": "ev-1",
@@ -50,11 +47,7 @@ async def test_visualize_data_supports_only_controlled_plotly_contracts(
 
 async def test_visualize_data_rejects_missing_evidence_and_fields() -> None:
     tool = VisualizeDataTool()
-    context = ToolExecutionContext(
-        user_id="user",
-        conversation_id="conversation",
-        request_id="request",
-    )
+    context = ToolExecutionContext()
     missing = await tool.execute(
         context,
         tool.args_model(
@@ -80,11 +73,7 @@ async def test_registry_owns_registration_and_argument_validation() -> None:
     result = await registry.execute(
         "visualize_data",
         {"chart_type": "bar"},
-        ToolExecutionContext(
-            user_id="user",
-            conversation_id="conversation",
-            request_id="request",
-        ),
+        ToolExecutionContext(),
     )
 
     assert isinstance(result, ToolFailure)

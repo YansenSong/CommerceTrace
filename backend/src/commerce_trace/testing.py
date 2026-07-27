@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from .agent import Agent
 from .agent.tools import FakeSqlExecutor, build_default_registry
-from .context import ContextAssembler, schema_fingerprint
+from .context import ContextAssembler
 from .contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
 from .llm import LlmService
 from .persistence import InMemoryStore

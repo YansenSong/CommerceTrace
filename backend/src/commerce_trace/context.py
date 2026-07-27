@@ -217,7 +217,7 @@ class ContextAssembler:
         self.include_golden_examples = include_golden_examples
         self.schema_provider = schema_provider or StaticSchemaProvider()
 
-    async def assemble(self, question: str) -> RetrievedContext:
+    async def assemble(self) -> RetrievedContext:
         schema_catalog = await self.schema_provider.load()
         if self.include_knowledge:
             rules, metrics, knowledge_version = self.knowledge_loader.load()

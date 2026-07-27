@@ -2,7 +2,7 @@ from commerce_trace.context import ContextAssembler, schema_fingerprint
 
 
 async def test_context_contains_complete_versioned_schema_before_model_use() -> None:
-    context = await ContextAssembler().assemble("按地区统计销售额")
+    context = await ContextAssembler().assemble()
 
     assert len(context.schema_catalog["tables"]) == 8
     assert "ordered_at" in context.schema_catalog["tables"]["orders"]["columns"]

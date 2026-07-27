@@ -1,7 +1,6 @@
 import pytest
 
 from commerce_trace.agent.state import RequestPhase, RequestState
-from commerce_trace.context import RetrievedContext
 from commerce_trace.contracts import Evidence
 
 
@@ -14,15 +13,6 @@ def build_state() -> RequestState:
     )
 
 
-def build_context() -> RetrievedContext:
-    return RetrievedContext(
-        schema_catalog={"version": "1"},
-        schema_fingerprint="schema-v1",
-        schema_version="1",
-        knowledge_version="1",
-    )
-
-
 def test_request_state_enforces_phase_order() -> None:
     state = build_state()
 
@@ -32,7 +22,7 @@ def test_request_state_enforces_phase_order() -> None:
     ):
         state.prepare_execution()
 
-    state.set_context(build_context())
+    state.mark_context_ready()
     state.prepare_execution()
     state.begin_synthesis()
     state.finish(RequestPhase.COMPLETED)
@@ -42,7 +32,7 @@ def test_request_state_enforces_phase_order() -> None:
 
 def test_request_state_owns_budget_and_evidence_progress() -> None:
     state = build_state()
-    state.set_context(build_context())
+    state.mark_context_ready()
     state.prepare_execution()
 
     assert state.begin_tool(

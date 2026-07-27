@@ -6,7 +6,7 @@ from pathlib import Path
 from .agent import Agent
 from .agent.tools import build_default_registry
 from .config import Settings
-from .context import ContextAssembler, KnowledgeLoader, schema_fingerprint
+from .context import ContextAssembler, KnowledgeLoader
 from .llm import LlmService, OpenAICompatibleLlm
 from .persistence import SQLiteResources, SQLiteSchemaProvider, SQLiteSqlExecutor, SQLiteStore
 from .sql_safety import SqlSafetyPolicy

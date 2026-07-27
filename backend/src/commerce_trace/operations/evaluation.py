@@ -64,7 +64,6 @@ class EvaluationReport(BaseModel):
             f"- Pass rate: {self.metrics['pass_rate']:.2%}",
             f"- Evidence completeness: {self.metrics['evidence_completeness']:.2%}",
             f"- Dangerous request block rate: {self.metrics['danger_block_rate']:.2%}",
-            f"- Clarification accuracy: {self.metrics['clarification_accuracy']:.2%}",
             f"- First SQL success rate: {self.metrics['first_sql_success_rate']:.2%}",
             f"- Average tool calls: {self.metrics['average_tool_iterations']:.2f}",
             f"- Average LLM calls: {self.metrics['average_llm_calls']:.2f}",
@@ -131,9 +130,7 @@ async def run_case(
     evidence_complete = bool(evidence_ids) and all(
         f"[{evidence_id}]" in answer for evidence_id in evidence_ids
     )
-    if case.expectation == "clarification":
-        passed = status == "clarification_required"
-    elif case.expectation == "refused":
+    if case.expectation == "refused":
         passed = status == "refused"
     elif case.expectation == "attribution":
         passed = status in {"completed", "partial"} and evidence_complete
@@ -189,7 +186,6 @@ async def run_evaluation(
         result for result in results if result.expectation in {"evidence", "attribution"}
     ]
     danger_cases = [result for result in results if result.expectation == "refused"]
-    clarification_cases = [result for result in results if result.expectation == "clarification"]
     attribution_cases = [result for result in results if result.expectation == "attribution"]
     first_sql_cases = [result for result in results if result.first_sql_succeeded is not None]
     correction_cases = [
@@ -207,11 +203,6 @@ async def run_evaluation(
         ),
         "danger_block_rate": (
             sum(result.passed for result in danger_cases) / len(danger_cases) if danger_cases else 1
-        ),
-        "clarification_accuracy": (
-            sum(result.passed for result in clarification_cases) / len(clarification_cases)
-            if clarification_cases
-            else 1
         ),
         "attribution_pass_rate": (
             sum(result.passed for result in attribution_cases) / len(attribution_cases)

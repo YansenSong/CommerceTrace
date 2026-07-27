@@ -1,83 +1,11 @@
 from commerce_trace.agent import Agent
+from commerce_trace.agent.synthesis import synthesize
 from commerce_trace.agent.tools import FakeSqlExecutor, build_default_registry
 from commerce_trace.context import ContextAssembler
 from commerce_trace.contracts import EventType, Evidence, LlmResponse, ToolCall
 from commerce_trace.llm import LlmService
-from commerce_trace.testing import ScriptedLlm
 from commerce_trace.persistence import InMemoryStore
-
-
-class CoverageGapLlm(LlmService):
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def complete(self, messages, tools, system_prompt):  # type: ignore[no-untyped-def]
-        self.calls += 1
-        if self.calls == 1:
-            return LlmResponse(
-                tool_calls=[
-                    ToolCall(
-                        name="run_sql",
-                        arguments={
-                            "sql": (
-                                "SELECT COUNT(*) AS order_count, "
-                                "MIN(ordered_at) AS min_date, "
-                                "MAX(ordered_at) AS max_date "
-                                "FROM ecommerce.orders"
-                            ),
-                            "purpose": "检查上个月订单量和数据覆盖范围",
-                            "expected_columns": [
-                                "order_count",
-                                "min_date",
-                                "max_date",
-                                "last_month",
-                            ],
-                        },
-                    )
-                ]
-            )
-        return LlmResponse(content="结论：上个月的订单总量是 0。")
-
-
-async def test_out_of_range_last_month_is_not_reported_as_real_zero() -> None:
-    store = InMemoryStore()
-    agent = Agent(
-        llm=CoverageGapLlm(),
-        registry=build_default_registry(
-            executor=FakeSqlExecutor(
-                rows=[
-                    {
-                        "order_count": 0,
-                        "min_date": "2025-01-01T17:33:27+00:00",
-                        "max_date": "2025-09-30T04:07:35+00:00",
-                        "last_month": "2026-06",
-                    }
-                ]
-            ),
-    
-        ),
-        context_assembler=ContextAssembler(),
-        store=store,
-
-    )
-
-    events = [
-        event
-        async for event in agent.run(
-            user_id="coverage-user",
-            conversation_id="coverage-conversation",
-            request_id="coverage-request",
-            question="上个月的订单总量是多少",
-        )
-    ]
-
-    completed = events[-1]
-    assert completed.payload["status"] == "partial"
-    assert completed.payload["stop_reason"] == "data_coverage_gap"
-    assert "当前数据无法回答上个月（2026年6月）的订单总量" in completed.payload["answer"]
-    assert "不能说明实际订单总量为 0" in completed.payload["answer"]
-    assert "数据表明当前问题可由" not in completed.payload["answer"]
-    assert completed.payload["evidence_ids"]
+from commerce_trace.testing import ScriptedLlm
 
 
 def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() -> None:
@@ -93,8 +21,7 @@ def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() ->
         preview=[{"region": "华东", "revenue": 1200}],
     )
 
-    answer = Agent._synthesize(
-        "哪个地区销售额最高？",
+    answer = synthesize(
         [evidence],
         "华东销售额最高，为 1200。[ev_known] [ev_unknown]",
         None,
@@ -118,8 +45,7 @@ def test_synthesis_removes_chart_id_markdown_image_reference() -> None:
         preview=[{"region": "西南", "revenue": 292422.49}],
     )
 
-    answer = Agent._synthesize(
-        "按地区展示销售额",
+    answer = synthesize(
         [evidence],
         (
             "各地区销售额排名如下。[ev_regions]\n\n"
@@ -134,8 +60,7 @@ def test_synthesis_removes_chart_id_markdown_image_reference() -> None:
 
 
 def test_synthesis_keeps_internal_incomplete_reason_out_of_answer() -> None:
-    answer = Agent._synthesize(
-        "分析一下销售情况",
+    answer = synthesize(
         [],
         "",
         "insufficient_evidence",
@@ -145,52 +70,6 @@ def test_synthesis_keeps_internal_incomplete_reason_out_of_answer() -> None:
     assert "分析已停止" not in answer
     assert "当前没有获得足够的可执行查询证据" in answer
     assert "请补充时间范围或明确需要分析的指标" in answer
-
-
-def test_coverage_gap_omits_unadopted_exploration_evidence() -> None:
-    coverage = Evidence(
-        evidence_id="ev_coverage",
-        analysis_step="检查数据范围",
-        tool_call_id="call-coverage",
-        claim=(
-            "确认数据中的时间范围："
-            "min_date=2025-01-01T00:00:00+00:00，"
-            "max_date=2025-09-30T00:00:00+00:00"
-        ),
-        sql="SELECT MIN(ordered_at) AS min_date, MAX(ordered_at) AS max_date FROM ecommerce.orders",
-        columns=["min_date", "max_date"],
-        row_count=1,
-        result_hash="coverage-hash",
-        preview=[
-            {
-                "min_date": "2025-01-01T00:00:00+00:00",
-                "max_date": "2025-09-30T00:00:00+00:00",
-            }
-        ],
-    )
-    exploration = Evidence(
-        evidence_id="ev_exploration",
-        analysis_step="探索订单月份",
-        tool_call_id="call-exploration",
-        claim="查询2025年9月（上个月）的订单总量：total_orders=35",
-        sql="SELECT COUNT(*) AS total_orders FROM ecommerce.orders",
-        columns=["total_orders"],
-        row_count=1,
-        result_hash="exploration-hash",
-        preview=[{"total_orders": 35}],
-    )
-
-    answer = Agent._synthesize(
-        "上个月的订单总量是多少",
-        [coverage, exploration],
-        "结论：上个月订单总量为 35。[ev_exploration]",
-        "data_coverage_gap",
-    )
-
-    assert "当前数据无法回答上个月" in answer
-    assert "确认数据中的时间范围" in answer
-    assert "查询2025年9月（上个月）" not in answer
-    assert "[ev_exploration]" not in answer
 
 
 async def test_greeting_goes_through_normal_agent_flow() -> None:
