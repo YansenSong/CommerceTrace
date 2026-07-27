@@ -14,6 +14,8 @@ from .persistence import SQLiteResources, SQLiteSqlExecutor, SQLiteStore
 
 @dataclass
 class Runtime:
+    """保存一次应用运行所需的存储、Agent 和外部资源。"""
+
     store: SQLiteStore
     agent: Agent
     resources: list[SQLiteResources]
@@ -21,6 +23,8 @@ class Runtime:
 
 @dataclass(frozen=True)
 class FeatureConfiguration:
+    """控制知识注入和 SQL 重试等可消融功能。"""
+
     include_knowledge: bool = True
     enable_sql_retries: bool = True
 
@@ -29,6 +33,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _project_path(path: Path) -> Path:
+    """将相对路径解析为相对于项目根目录的绝对路径。"""
+
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
@@ -37,6 +43,8 @@ def build_runtime(
     features: FeatureConfiguration | None = None,
     llm: LlmService | None = None,
 ) -> Runtime:
+    """根据配置组装数据库、工具注册表和 Agent 运行时。"""
+
     features = features or FeatureConfiguration()
     database_path = _project_path(settings.database_path)
     resources = SQLiteResources(database_path)

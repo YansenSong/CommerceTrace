@@ -12,6 +12,8 @@ from ..models import LlmMessage, LlmResponse, ToolCall, ToolSchema
 
 
 def _http_proxy_from_environment() -> str | None:
+    """读取首个格式有效的 HTTP 代理环境变量。"""
+
     for variable in (
         "HTTPS_PROXY",
         "HTTP_PROXY",
@@ -27,6 +29,8 @@ def _http_proxy_from_environment() -> str | None:
 
 
 class LlmService(ABC):
+    """定义 Agent 所依赖的大模型补全服务接口。"""
+
     @abstractmethod
     async def complete(
         self,
@@ -34,10 +38,14 @@ class LlmService(ABC):
         tools: list[ToolSchema],
         system_prompt: str,
     ) -> LlmResponse:
+        """根据消息、工具定义和系统提示生成一次模型响应。"""
+
         raise NotImplementedError
 
 
 class OpenAICompatibleLlm(LlmService):
+    """通过 OpenAI 兼容的聊天补全接口访问大模型。"""
+
     def __init__(
         self,
         *,
@@ -47,6 +55,8 @@ class OpenAICompatibleLlm(LlmService):
         timeout: float = 60,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        """保存接口地址、鉴权、模型和网络请求配置。"""
+
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -59,6 +69,8 @@ class OpenAICompatibleLlm(LlmService):
         tools: list[ToolSchema],
         system_prompt: str,
     ) -> LlmResponse:
+        """发送聊天补全请求并解析文本、工具调用及令牌用量。"""
+
         payload_messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         for message in messages:
             item: dict[str, Any] = {"role": message.role, "content": message.content}

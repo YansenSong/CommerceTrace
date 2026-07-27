@@ -1,4 +1,4 @@
-"""Ecommerce schema catalog injected into the system prompt."""
+"""注入系统提示词的电商 Schema 目录。"""
 
 from __future__ import annotations
 
@@ -98,6 +98,8 @@ SCHEMA_CATALOG: dict[str, Any] = {
 
 
 def schema_fingerprint(catalog: dict[str, Any] | None = None) -> str:
+    """对规范化后的 Schema 目录计算稳定的 SHA-256 指纹。"""
+
     if catalog is None:
         catalog = SCHEMA_CATALOG
     canonical = json.dumps(catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

@@ -8,22 +8,32 @@ from .args import VisualizeDataArgs
 
 
 class VisualizeDataTool(Tool[VisualizeDataArgs]):
-    """Generates a controlled Plotly JSON chart from an Evidence result."""
+    """根据当前请求的证据结果生成受控 Plotly JSON 图表。"""
 
     _allowed_types = {"metric_card", "bar", "line", "pie"}
 
     @property
     def name(self) -> str:
+        """返回工具注册名称。"""
+
         return "visualize_data"
 
     @property
     def description(self) -> str:
+        """返回提供给大模型的工具说明。"""
+
         return "从本次请求的 Evidence 结果生成受控 Plotly JSON"
 
     def get_args_schema(self) -> type[VisualizeDataArgs]:
+        """返回可视化工具的参数校验模型。"""
+
         return VisualizeDataArgs
 
-    async def execute(self, context: ToolContext, args: VisualizeDataArgs) -> ToolSuccess | ToolFailure:
+    async def execute(
+        self, context: ToolContext, args: VisualizeDataArgs
+    ) -> ToolSuccess | ToolFailure:
+        """校验证据和字段后生成受控图表数据。"""
+
         evidence_result = next(
             (
                 value
@@ -74,6 +84,8 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
     async def on_success(
         self, context: ToolContext, args: VisualizeDataArgs, result: ToolSuccess
     ) -> None:
+        """恢复图表模型，将其持久化并加入本次请求的图表列表。"""
+
         chart_data = result.data.get("chart")
         if chart_data is None:
             return
@@ -85,6 +97,8 @@ class VisualizeDataTool(Tool[VisualizeDataArgs]):
         context.created_charts.append(chart)
 
     def _build_figure(self, args: VisualizeDataArgs, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """按图表类型把查询行转换为受控 Plotly figure 结构。"""
+
         if args.chart_type == "metric_card":
             value_field = args.value or args.y
             return {

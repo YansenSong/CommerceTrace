@@ -8,7 +8,11 @@ from sqlglot.errors import ParseError
 
 
 class SqlSafetyError(ValueError):
+    """表示带有安全错误码、可向用户展示的 SQL 校验异常。"""
+
     def __init__(self, code: str, message: str) -> None:
+        """保存内部错误码和经过脱敏的错误消息。"""
+
         super().__init__(message)
         self.code = code
         self.safe_message = message
@@ -16,12 +20,16 @@ class SqlSafetyError(ValueError):
 
 @dataclass(frozen=True)
 class ValidatedSql:
+    """保存安全校验后的 SQL、行数上限和探索类型。"""
+
     normalized_sql: str
     row_limit: int
     is_distinct_exploration: bool
 
 
 class SqlSafetyPolicy:
+    """限制查询范围、语句类型、字段探索和危险数据库函数。"""
+
     allowed_schema = "ecommerce"
     allowed_tables = {
         "customers",
@@ -54,10 +62,14 @@ class SqlSafetyPolicy:
     }
 
     def __init__(self, max_rows: int = 500, max_distinct_values: int = 50) -> None:
+        """设置普通查询和去重探索查询的最大返回行数。"""
+
         self.max_rows = max_rows
         self.max_distinct_values = max_distinct_values
 
     def validate(self, sql: str) -> ValidatedSql:
+        """解析并校验 SQL，返回可安全执行的规范化查询。"""
+
         raw = sql.strip().rstrip(";").strip()
         if not raw:
             raise SqlSafetyError("empty_sql", "查询不能为空")
@@ -136,6 +148,8 @@ class SqlSafetyPolicy:
         )
 
     def _validate_distinct_exploration(self, statement: exp.Select) -> None:
+        """确保 DISTINCT 探索只读取单个白名单非敏感字段。"""
+
         selected = list(statement.expressions)
         tables = [table for table in statement.find_all(exp.Table)]
         if len(selected) != 1 or len(tables) != 1:

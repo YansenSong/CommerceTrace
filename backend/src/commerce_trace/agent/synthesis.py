@@ -5,30 +5,25 @@ import re
 from ..models import Evidence
 
 EVIDENCE_REFERENCE_RE = re.compile(r"\[(ev_[A-Za-z0-9_-]+)\]")
-CHART_MARKDOWN_REFERENCE_RE = re.compile(
-    r"!\[[^\]\n]*\]\(\s*chart_[A-Za-z0-9_-]+\s*\)"
-)
+CHART_MARKDOWN_REFERENCE_RE = re.compile(r"!\[[^\]\n]*\]\(\s*chart_[A-Za-z0-9_-]+\s*\)")
 INCOMPLETE_REASON_MESSAGES = {
     "insufficient_evidence": (
         "当前没有获得足够的可执行查询证据，暂时无法形成可靠结论。"
         "请补充时间范围或明确需要分析的指标。"
     ),
     "business_sql_limit": (
-        "已达到本轮查询次数上限，当前结果可能不完整。"
-        "如需继续，请缩小分析范围后重试。"
+        "已达到本轮查询次数上限，当前结果可能不完整。如需继续，请缩小分析范围后重试。"
     ),
-    "tool_iteration_limit": (
-        "已达到本轮工具调用上限，当前结果可能不完整。"
-        "请缩小问题范围后重试。"
-    ),
+    "tool_iteration_limit": ("已达到本轮工具调用上限，当前结果可能不完整。请缩小问题范围后重试。"),
     "sql_retry_limit": (
-        "查询在多次修正后仍未成功，暂时无法补充更多证据。"
-        "请调整问题或检查数据字段。"
+        "查询在多次修正后仍未成功，暂时无法补充更多证据。请调整问题或检查数据字段。"
     ),
 }
 
 
 def incomplete_reason_message(incomplete_reason: str | None) -> str:
+    """将内部未完成原因转换为适合向用户展示的中文提示。"""
+
     if incomplete_reason is None:
         return ""
     return INCOMPLETE_REASON_MESSAGES.get(
@@ -42,6 +37,8 @@ def synthesize(
     llm_content: str,
     incomplete_reason: str | None,
 ) -> str:
+    """清理模型回答、校验证据引用并补齐口径与未完成说明。"""
+
     model_answer = CHART_MARKDOWN_REFERENCE_RE.sub("", llm_content).strip()
     model_answer = re.sub(r"\n{3,}", "\n\n", model_answer)
     if not evidence:
@@ -67,9 +64,7 @@ def synthesize(
     if missing:
         heading = "补充证据：" if "证据：" in answer else "证据："
         sections.append(
-            heading
-            + "\n"
-            + "\n".join(f"- {item.claim} [{item.evidence_id}]" for item in missing)
+            heading + "\n" + "\n".join(f"- {item.claim} [{item.evidence_id}]" for item in missing)
         )
     if "口径说明：" not in answer:
         sections.append("口径说明：以上结论仅基于当前数据库覆盖范围和本次已执行查询。")

@@ -16,6 +16,8 @@ from ..models import EventType, StreamEvent
 
 
 class EvaluationCase(BaseModel):
+    """描述评估数据集中的单个问题及预期行为。"""
+
     id: str
     category: str
     question: str
@@ -23,11 +25,15 @@ class EvaluationCase(BaseModel):
 
 
 class EvaluationDataset(BaseModel):
+    """保存带版本号的一组评估用例。"""
+
     version: str
     cases: list[EvaluationCase]
 
 
 class CaseResult(BaseModel):
+    """记录单个评估用例的行为、用量、延迟和通过状态。"""
+
     case_id: str
     category: str
     expectation: str
@@ -47,6 +53,8 @@ class CaseResult(BaseModel):
 
 
 class EvaluationReport(BaseModel):
+    """汇总一次评估运行的配置、指标和逐用例结果。"""
+
     run_id: str = Field(default_factory=lambda: f"eval_{uuid4().hex[:12]}")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     dataset_version: str
@@ -55,6 +63,8 @@ class EvaluationReport(BaseModel):
     results: list[CaseResult]
 
     def markdown(self) -> str:
+        """将评估摘要和失败用例渲染为 Markdown 报告。"""
+
         lines = [
             "# CommerceTrace Evaluation Report",
             "",
@@ -90,6 +100,8 @@ class EvaluationReport(BaseModel):
 
 
 def load_dataset(path: Path) -> EvaluationDataset:
+    """从 YAML 文件读取并校验评估数据集。"""
+
     return EvaluationDataset.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
@@ -99,6 +111,8 @@ async def run_case(
     case: EvaluationCase,
     user_id: str,
 ) -> CaseResult:
+    """运行单个评估用例并从事件流计算行为指标。"""
+
     started = time.perf_counter()
     events: list[StreamEvent] = [
         event
@@ -176,6 +190,8 @@ async def run_evaluation(
     configuration: dict[str, Any],
     limit: int | None = None,
 ) -> EvaluationReport:
+    """按顺序运行数据集用例并汇总整体及分类指标。"""
+
     selected = dataset.cases[:limit] if limit else dataset.cases
     results = [
         await run_case(agent=agent, case=case, user_id=f"eval_{case.id}") for case in selected
@@ -249,6 +265,8 @@ async def run_evaluation(
 
 
 def write_report(report: EvaluationReport, directory: Path) -> tuple[Path, Path]:
+    """将评估报告同时写为 JSON 和 Markdown 文件。"""
+
     directory.mkdir(parents=True, exist_ok=True)
     json_path = directory / f"{report.run_id}.json"
     markdown_path = directory / f"{report.run_id}.md"
@@ -266,6 +284,8 @@ def write_ablation_report(
     configuration: dict[str, Any],
     directory: Path,
 ) -> tuple[Path, Path]:
+    """汇总多个消融变体，并写出 JSON 与 Markdown 对比报告。"""
+
     run_id = f"ablation_{uuid4().hex[:12]}"
     payload = {
         "run_id": run_id,

@@ -11,28 +11,40 @@ from .args import RunSqlArgs
 
 
 class RunSqlTool(Tool[RunSqlArgs]):
-    """Executes a bounded, read-only SQLite business query."""
+    """执行有返回上限且只读的 SQLite 业务查询。"""
 
     def __init__(self, executor: SqlExecutor, policy: SqlSafetyPolicy | None = None) -> None:
+        """注入 SQL 执行器，并使用给定或默认的安全策略。"""
+
         self._executor = executor
         self._policy = policy or SqlSafetyPolicy()
 
     @property
     def kind(self) -> str:
+        """将此工具标记为需要独立预算控制的业务 SQL 工具。"""
+
         return "business_sql"
 
     @property
     def name(self) -> str:
+        """返回工具注册名称。"""
+
         return "run_sql"
 
     @property
     def description(self) -> str:
+        """返回提供给大模型的工具说明。"""
+
         return "执行一条有界的 SQLite 只读业务查询"
 
     def get_args_schema(self) -> type[RunSqlArgs]:
+        """返回 SQL 工具的参数校验模型。"""
+
         return RunSqlArgs
 
     async def execute(self, context: ToolContext, args: RunSqlArgs) -> ToolSuccess | ToolFailure:
+        """校验并执行查询，把有界结果缓存到当前工具上下文。"""
+
         try:
             validated = self._policy.validate(args.sql)
         except SqlSafetyError as exc:
@@ -72,6 +84,8 @@ class RunSqlTool(Tool[RunSqlArgs]):
         return ToolSuccess(data=data)
 
     async def on_success(self, context: ToolContext, args: RunSqlArgs, result: ToolSuccess) -> None:
+        """把成功查询转换为可追溯证据并按需持久化。"""
+
         data = result.data
         preview = data.get("preview", [])
         if preview:

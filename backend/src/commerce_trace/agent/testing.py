@@ -11,7 +11,7 @@ from ..persistence import InMemoryStore
 
 
 class ScriptedLlm(LlmService):
-    """Deterministic tool-calling test double; never used by the application runtime."""
+    """提供确定性工具调用的测试替身，不用于正式应用运行时。"""
 
     async def complete(
         self,
@@ -19,6 +19,8 @@ class ScriptedLlm(LlmService):
         tools: list[ToolSchema],
         system_prompt: str,
     ) -> LlmResponse:
+        """根据已有工具消息返回预设的 SQL 调用、重试或最终回答。"""
+
         tool_messages = [message for message in messages if message.role == "tool"]
         sql_messages = [
             message for message in tool_messages if '"tool_name": "run_sql"' in message.content
@@ -65,6 +67,8 @@ class ScriptedLlm(LlmService):
 
 
 def build_test_agent(store: InMemoryStore) -> Agent:
+    """使用内存存储和固定数据构建无需联网的测试 Agent。"""
+
     executor = FakeSqlExecutor(
         rows=[
             {"region": "华东", "revenue": 1200.0},

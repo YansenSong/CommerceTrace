@@ -16,6 +16,8 @@ ResultT = TypeVar("ResultT")
 
 
 def database_files(path: Path) -> tuple[Path, Path, Path]:
+    """根据主库路径推导主库、业务库和 Agent 库的文件路径。"""
+
     return (
         path,
         path.with_name(f"{path.stem}-ecommerce{path.suffix}"),
@@ -24,6 +26,8 @@ def database_files(path: Path) -> tuple[Path, Path, Path]:
 
 
 def connect_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
+    """连接主 SQLite 数据库并挂载业务库和 Agent 库。"""
+
     main_path, ecommerce_path, agent_path = database_files(path)
     main_path.parent.mkdir(parents=True, exist_ok=True)
     if read_only:
@@ -48,21 +52,31 @@ def connect_sqlite(path: Path, *, read_only: bool = False) -> sqlite3.Connection
 
 
 class SQLiteResources:
+    """管理共享 SQLite 连接，并串行化同一连接上的异步操作。"""
+
     def __init__(self, path: Path) -> None:
+        """保存数据库路径并初始化连接锁。"""
+
         self.path = path
         self.connection: sqlite3.Connection | None = None
         self.lock = asyncio.Lock()
 
     async def open(self) -> None:
+        """在尚未连接时打开共享 SQLite 连接。"""
+
         if self.connection is None:
             self.connection = connect_sqlite(self.path)
 
     async def close(self) -> None:
+        """关闭共享连接并清除连接引用。"""
+
         if self.connection is not None:
             self.connection.close()
             self.connection = None
 
     async def run(self, operation: Callable[[sqlite3.Connection], ResultT]) -> ResultT:
+        """在连接锁保护下运行一个同步数据库操作。"""
+
         if self.connection is None:
             raise RuntimeError("SQLite resource is not open")
         async with self.lock:
@@ -70,11 +84,19 @@ class SQLiteResources:
 
 
 class SQLiteSchemaProvider:
+    """从 SQLite 校验并加载提供给 Agent 的业务 Schema。"""
+
     def __init__(self, resources: SQLiteResources) -> None:
+        """注入共享 SQLite 资源。"""
+
         self.resources = resources
 
     async def load(self) -> dict[str, Any]:
+        """校验实际表字段与目录一致后返回 Schema 深拷贝。"""
+
         def operation(connection: sqlite3.Connection) -> dict[str, Any]:
+            """在共享连接中读取并比对业务表字段。"""
+
             observed: dict[str, set[str]] = {}
             for table in SCHEMA_CATALOG["tables"]:
                 rows = connection.execute(f"PRAGMA ecommerce.table_info('{table}')").fetchall()
@@ -94,13 +116,21 @@ class SQLiteSchemaProvider:
 
 
 class SQLiteStore:
+    """使用 SQLite 持久化用户会话、事件、工具结果、证据和图表。"""
+
     def __init__(self, resources: SQLiteResources) -> None:
+        """注入共享 SQLite 资源。"""
+
         self.resources = resources
 
     async def health(self) -> dict[str, Any]:
+        """检查数据库连接及业务数据集是否可用。"""
+
         try:
 
             def operation(connection: sqlite3.Connection) -> bool:
+                """检查业务订单表中是否已有数据。"""
+
                 dataset = connection.execute(
                     "SELECT EXISTS (SELECT 1 FROM ecommerce.orders)"
                 ).fetchone()[0]
@@ -118,7 +148,11 @@ class SQLiteStore:
             }
 
     async def ensure_user(self, user_id: str) -> None:
+        """幂等创建匿名用户记录。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在 Agent 库中插入缺失的匿名用户。"""
+
             connection.execute(
                 """
                 INSERT INTO agent_app.anonymous_users (user_id)
@@ -131,7 +165,11 @@ class SQLiteStore:
         await self.resources.run(operation)
 
     async def ensure_conversation(self, conversation_id: str, user_id: str, title: str) -> None:
+        """创建会话，或验证并刷新属于指定用户的已有会话。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中校验归属并写入会话记录。"""
+
             existing = connection.execute(
                 """
                 SELECT user_id FROM agent_app.conversations WHERE conversation_id = ?
@@ -156,7 +194,11 @@ class SQLiteStore:
         await self.resources.run(operation)
 
     async def save_message(self, conversation_id: str, role: str, content: str) -> None:
+        """保存消息并刷新所属会话的更新时间。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中插入消息并更新会话时间。"""
+
             now = datetime.utcnow().isoformat()
             connection.execute(
                 """
@@ -176,7 +218,11 @@ class SQLiteStore:
         await self.resources.run(operation)
 
     async def save_event(self, user_id: str, event: StreamEvent) -> None:
+        """验证会话归属后幂等保存流式事件。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中校验归属并序列化写入事件。"""
+
             owner = connection.execute(
                 """
                 SELECT 1 FROM agent_app.conversations
@@ -215,7 +261,11 @@ class SQLiteStore:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> None:
+        """验证会话归属后记录工具调用开始状态。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中校验归属并插入工具调用。"""
+
             owner = connection.execute(
                 """
                 SELECT 1 FROM agent_app.conversations
@@ -254,7 +304,11 @@ class SQLiteStore:
         success: bool,
         summary: dict[str, Any],
     ) -> None:
+        """验证工具归属后更新状态并保存结果摘要。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中更新工具调用并插入结果记录。"""
+
             owner = connection.execute(
                 """
                 SELECT 1
@@ -296,7 +350,11 @@ class SQLiteStore:
         request_id: str,
         evidence: Evidence,
     ) -> None:
+        """验证会话归属后保存可追溯查询证据。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中序列化并插入证据记录。"""
+
             owner = connection.execute(
                 """
                 SELECT 1 FROM agent_app.conversations
@@ -341,7 +399,11 @@ class SQLiteStore:
         request_id: str,
         chart: Chart,
     ) -> None:
+        """验证会话归属后保存图表定义。"""
+
         def operation(connection: sqlite3.Connection) -> None:
+            """在事务中序列化并插入图表记录。"""
+
             owner = connection.execute(
                 """
                 SELECT 1 FROM agent_app.conversations
@@ -376,7 +438,11 @@ class SQLiteStore:
     async def list_conversations(
         self, user_id: str, limit: int, offset: int
     ) -> list[dict[str, Any]]:
+        """按更新时间倒序分页列出指定用户的会话。"""
+
         def operation(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+            """查询并转换指定用户的会话行。"""
+
             rows = connection.execute(
                 """
                 SELECT conversation_id, title, created_at, updated_at
@@ -394,7 +460,11 @@ class SQLiteStore:
     async def replay_conversation(
         self, user_id: str, conversation_id: str
     ) -> dict[str, Any] | None:
+        """读取并组装指定用户的一次完整会话。"""
+
         def operation(connection: sqlite3.Connection) -> dict[str, Any] | None:
+            """查询会话关联记录并还原序列化字段。"""
+
             conversation = connection.execute(
                 """
                 SELECT conversation_id, title, created_at, updated_at
@@ -496,14 +566,21 @@ class SQLiteStore:
         return await self.resources.run(operation)
 
 
-
 class SQLiteSqlExecutor:
+    """使用独立只读连接执行带超时和行数边界的业务 SQL。"""
+
     def __init__(self, database_path: Path, *, statement_timeout_ms: int = 5_000) -> None:
+        """保存数据库路径和单条语句超时时间。"""
+
         self.database_path = database_path
         self.statement_timeout_ms = statement_timeout_ms
 
     async def execute(self, sql: str, row_limit: int) -> list[dict[str, Any]]:
+        """执行只读 SQL，并将结果行转换为字典。"""
+
         def operation() -> list[dict[str, Any]]:
+            """在独立只读连接中执行查询并确保关闭连接。"""
+
             connection = connect_sqlite(self.database_path, read_only=True)
             deadline = time.monotonic() + self.statement_timeout_ms / 1000
             connection.set_progress_handler(

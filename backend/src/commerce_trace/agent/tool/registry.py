@@ -15,33 +15,34 @@ logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
-    """Central registry that owns tool registration, argument transformation,
-    execution, and lifecycle hook dispatch.
-    """
+    """集中管理工具注册、参数转换、执行和生命周期钩子分发。"""
 
     def __init__(self) -> None:
+        """初始化一个空的工具名称到工具实例映射。"""
+
         self._tools: dict[str, Tool[Any]] = {}
 
     def register(self, tool: Tool[Any]) -> None:
+        """注册工具，并拒绝名称重复的工具。"""
+
         if tool.name in self._tools:
             raise ValueError(f"duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
 
     def tool_kind(self, name: str) -> str:
-        """Return the ``kind`` category of a registered tool, or ``"default"``."""
+        """返回已注册工具的类别，未找到时返回默认类别。"""
+
         tool = self._tools.get(name)
         return tool.kind if tool else "default"
 
     def schemas(self) -> list[ToolSchema]:
+        """返回全部已注册工具的大模型可读 Schema。"""
+
         return [tool.schema() for tool in self._tools.values()]
 
-    async def transform_args(
-        self, tool: Tool[Any], args: Any, context: ToolContext
-    ) -> Any:
-        """Hook point for cross-cutting argument transformation (enrichment,
-        row-level security, rejection).  The default is a no-op — override in
-        subclasses.
-        """
+    async def transform_args(self, tool: Tool[Any], args: Any, context: ToolContext) -> Any:
+        """提供参数增强、行级安全或拒绝等横切转换扩展点。"""
+
         return args
 
     async def execute(
@@ -50,6 +51,8 @@ class ToolRegistry:
         arguments: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        """校验并执行指定工具，同时分发生命周期钩子。"""
+
         tool = self._tools.get(name)
         if tool is None:
             return ToolFailure(
@@ -107,6 +110,8 @@ def build_default_registry(
     executor: SqlExecutor,
     policy: SqlSafetyPolicy | None = None,
 ) -> ToolRegistry:
+    """构建包含只读 SQL 和受控可视化工具的默认注册表。"""
+
     registry = ToolRegistry()
     registry.register(RunSqlTool(executor=executor, policy=policy))
     registry.register(VisualizeDataTool())

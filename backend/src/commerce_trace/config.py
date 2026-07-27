@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """集中声明后端可通过环境变量配置的运行参数。"""
+
     model_config = SettingsConfigDict(
         env_prefix="COMMERCE_TRACE_",
         env_file=".env",

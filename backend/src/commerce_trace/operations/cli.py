@@ -26,6 +26,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 def migrate(settings: Settings) -> None:
+    """按文件名顺序应用项目中的全部 SQLite 迁移脚本。"""
+
     migration_paths = sorted((PROJECT_ROOT / "migrations").glob("*.sql"))
     if not migration_paths:
         raise RuntimeError("no migrations found")
@@ -37,6 +39,8 @@ def migrate(settings: Settings) -> None:
 
 
 def generate_data(settings: Settings, profile: str) -> dict[str, Any]:
+    """按指定场景生成固定种子数据并装载到业务数据库。"""
+
     sys.path.insert(0, str(PROJECT_ROOT))
     from data_generator.generate import (  # type: ignore[import-not-found]
         COPY_COLUMNS,
@@ -107,6 +111,8 @@ def generate_data(settings: Settings, profile: str) -> dict[str, Any]:
 
 
 def _sqlite_value(value: Any) -> Any:
+    """把生成器值转换为 SQLite 可直接绑定的基础类型。"""
+
     if isinstance(value, Decimal):
         return float(value)
     if isinstance(value, (date, datetime)):
@@ -115,6 +121,8 @@ def _sqlite_value(value: Any) -> Any:
 
 
 def dataset_exists(settings: Settings) -> bool:
+    """检查数据库中是否存在已初始化的数据集元数据。"""
+
     try:
         with connect_sqlite(project_path(settings.database_path), read_only=True) as connection:
             row = connection.execute(
@@ -126,10 +134,14 @@ def dataset_exists(settings: Settings) -> bool:
 
 
 def project_path(path: Path) -> Path:
+    """将相对路径解析为相对于后端项目根目录的路径。"""
+
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 async def evaluate(settings: Settings, *, limit: int | None) -> None:
+    """构建完整运行时并执行一次可复现评估。"""
+
     runtime = build_runtime(settings)
     for resource in runtime.resources:
         await resource.open()
@@ -155,6 +167,8 @@ async def evaluate(settings: Settings, *, limit: int | None) -> None:
 
 
 async def ablation(settings: Settings, *, limit: int | None) -> None:
+    """依次运行不同功能组合并生成消融对比报告。"""
+
     variants = {
         "A_schema_only": FeatureConfiguration(
             include_knowledge=False,
@@ -204,6 +218,8 @@ async def ablation(settings: Settings, *, limit: int | None) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
+    """构建迁移、数据生成、评估和初始化命令的参数解析器。"""
+
     root = argparse.ArgumentParser(prog="commerce-trace")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate", help="Apply SQLite migrations")
@@ -219,9 +235,7 @@ def parser() -> argparse.ArgumentParser:
     ablation_parser.add_argument("--limit", type=int, default=None)
     init_parser = commands.add_parser("init", help="Initialize a clean CommerceTrace environment")
     init_parser.add_argument("--profile", choices=["test", "demo"], default="test")
-    init_parser.add_argument(
-        "--no-data", action="store_true", help="Skip data generation"
-    )
+    init_parser.add_argument("--no-data", action="store_true", help="Skip data generation")
     init_parser.add_argument(
         "--if-empty",
         action="store_true",
@@ -231,6 +245,8 @@ def parser() -> argparse.ArgumentParser:
 
 
 async def main() -> None:
+    """解析命令行参数并分派到对应的异步或同步操作。"""
+
     args = parser().parse_args()
     settings = Settings()
     if args.command == "migrate":
@@ -256,4 +272,6 @@ async def main() -> None:
 
 
 def main_sync() -> None:
+    """从同步命令行入口启动异步主函数。"""
+
     asyncio.run(main())

@@ -21,6 +21,8 @@ from .prompt import SYSTEM_PROMPT
 
 
 class Agent:
+    """编排模型、工具、状态机和持久化以完成一次数据问答。"""
+
     def __init__(
         self,
         *,
@@ -33,6 +35,8 @@ class Agent:
         max_sql_retries_per_purpose: int = 2,
         enable_sql_retries: bool = True,
     ) -> None:
+        """注入 Agent 依赖，并设置工具调用与 SQL 重试预算。"""
+
         self.llm = llm
         self.registry = registry
         self.context_assembler = context_assembler
@@ -51,6 +55,8 @@ class Agent:
         event: EventType,
         payload: dict[str, Any],
     ) -> StreamEvent:
+        """创建、持久化并返回一个流式事件。"""
+
         item = StreamEvent(
             event=event,
             conversation_id=conversation_id,
@@ -68,6 +74,8 @@ class Agent:
         request_id: str,
         question: str,
     ) -> AsyncGenerator[StreamEvent, None]:
+        """执行完整问答流程，并按发生顺序产出流式事件。"""
+
         state = RequestState(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -187,9 +195,7 @@ class Agent:
                 )
                 assert state.tool_context is not None
                 state.tool_context.tool_call_id = call.id
-                result = await self.registry.execute(
-                    call.name, call.arguments, state.tool_context
-                )
+                result = await self.registry.execute(call.name, call.arguments, state.tool_context)
                 if isinstance(result, ToolFailure):
                     state.record_tool_failure(tool_kind, purpose)
                     await self.store.save_tool_result(
@@ -296,9 +302,7 @@ class Agent:
             state.incomplete_reason,
         )
         terminal_phase = (
-            RequestPhase.INCOMPLETE
-            if state.incomplete_reason
-            else RequestPhase.COMPLETED
+            RequestPhase.INCOMPLETE if state.incomplete_reason else RequestPhase.COMPLETED
         )
         async for event in self._complete(
             state,
@@ -321,6 +325,8 @@ class Agent:
         terminal_phase: RequestPhase,
         payload: dict[str, Any],
     ) -> AsyncGenerator[StreamEvent, None]:
+        """结束请求、保存回答，并依次产出回答增量和完成事件。"""
+
         state.finish(terminal_phase)
         yield await self._make_event(
             user_id=state.user_id,
@@ -340,6 +346,8 @@ class Agent:
 
     @staticmethod
     def _is_unsafe_request(question: str) -> bool:
+        """检查问题是否包含写入、越权或敏感信息请求标记。"""
+
         lowered = question.lower()
         markers = {
             "drop ",
@@ -362,6 +370,8 @@ class Agent:
 
     @staticmethod
     def _safe_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """筛选允许持久化和发送给前端的安全工具参数。"""
+
         if name != "run_sql":
             return arguments
         return {
@@ -369,4 +379,3 @@ class Agent:
             "purpose": arguments.get("purpose"),
             "expected_columns": arguments.get("expected_columns", []),
         }
-
