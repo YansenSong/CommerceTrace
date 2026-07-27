@@ -15,7 +15,7 @@ def utc_now() -> datetime:
 
 class EventType(str, Enum):
     CONVERSATION_STARTED = "conversation.started"
-    CONTEXT_RETRIEVED = "context.retrieved"
+    CONTEXT_ASSEMBLED = "context.assembled"
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"
     TOOL_FAILED = "tool.failed"

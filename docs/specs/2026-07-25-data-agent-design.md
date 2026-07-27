@@ -124,7 +124,7 @@ AgentState
 ├─ user_question
 ├─ analysis_plan[]
 ├─ current_step
-├─ retrieved_context
+├─ agent_context
 ├─ tool_iterations
 ├─ business_sql_calls
 ├─ sql_retry_counts
@@ -139,9 +139,9 @@ AgentState
 stateDiagram-v2
     [*] --> Understand
     Understand --> Clarify: 关键口径存在歧义
-    Understand --> Retrieve: 问题足够明确
+    Understand --> Assemble: 问题足够明确
     Clarify --> [*]
-    Retrieve --> Plan
+    Assemble --> Plan
     Plan --> Act
     Act --> Observe
     Observe --> Act: 继续分析或修正
@@ -154,7 +154,7 @@ stateDiagram-v2
 
 1. Understand：识别指标、维度、时间范围、比较基准和请求是否属于电商分析。
 2. Clarify：仅在销售额口径、时间范围或比较对象会实质改变结果且无法确定时追问。
-3. Retrieve：确定性注入 Schema，并自动检索业务规则、Trusted SQL 和少量 Candidate。
+3. Assemble：确定性注入 Schema，并加载业务规则、Trusted SQL 和少量 Candidate。
 4. Plan：简单问题生成一个步骤；归因问题生成最多五个可展示步骤。
 5. Act：LLM 通过原生 Tool Calling 选择工具。
 6. Observe：将查询结果摘要或安全化错误返回 Agent。
@@ -507,7 +507,7 @@ PostgreSQL `agent_app` 至少保存：
 
 ```text
 conversation.started
-context.retrieved
+context.assembled
 plan.created
 plan.step_started
 tool.started

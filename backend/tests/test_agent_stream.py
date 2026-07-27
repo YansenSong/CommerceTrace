@@ -95,7 +95,7 @@ async def test_greeting_goes_through_normal_agent_flow() -> None:
 
     assert [event.event for event in events] == [
         EventType.CONVERSATION_STARTED,
-        EventType.CONTEXT_RETRIEVED,
+        EventType.CONTEXT_ASSEMBLED,
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,
         EventType.EVIDENCE_CREATED,
@@ -134,7 +134,7 @@ async def test_simple_question_streams_plan_tool_evidence_chart_answer_and_candi
 
     event_types = [event.event for event in events]
     assert event_types[0] is EventType.CONVERSATION_STARTED
-    assert EventType.CONTEXT_RETRIEVED in event_types
+    assert EventType.CONTEXT_ASSEMBLED in event_types
     assert EventType.TOOL_COMPLETED in event_types
     assert EventType.EVIDENCE_CREATED in event_types
     assert event_types[-1] is EventType.ANSWER_COMPLETED

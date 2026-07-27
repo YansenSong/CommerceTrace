@@ -73,11 +73,11 @@ export function applyEvent(state: ChatState, event: StreamEvent): ChatState {
         statusMessage: '正在分析问题',
       }
       }
-    case 'context.retrieved':
+    case 'context.assembled':
       return {
         ...base,
         statusMessage: event.payload.degraded
-          ? '核心 Schema 已加载，记忆检索已降级'
+          ? '核心 Schema 已加载，部分业务上下文加载已降级'
           : 'Schema 与业务上下文已加载',
       }
     case 'tool.started':

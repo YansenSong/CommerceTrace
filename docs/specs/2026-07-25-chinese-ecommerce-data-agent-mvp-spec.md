@@ -104,8 +104,8 @@
 - 第一版是独立实现的中文电商经营分析 Data Agent，借鉴 Vanna 2.0 的单 Agent Tool-calling、工具记忆与流式组件理念，但不 Fork、裁剪或复刻其完整工程。
 - 技术栈固定为 React 与 TypeScript 前端、FastAPI 后端、PostgreSQL、嵌入式 ChromaDB、原生 Tool Calling 的单一 OpenAI-compatible LLM 客户端、`BAAI/bge-small-zh-v1.5` Embedding 和 Docker Compose。
 - 系统采用单 Agent，不使用 LangChain、LangGraph 或多 Agent。API 层只负责身份、会话、请求、SSE 与依赖装配，不承载 Agent 决策。
-- Agent Core 维护显式请求状态，包括会话与请求标识、用户问题、分析计划、当前步骤、检索上下文、工具轮数、业务 SQL 次数、重试次数、Evidence、生成组件和终态。
-- Agent 状态流为 Understand、必要时 Clarify、Retrieve、Plan、Act、Observe、Synthesize、Remember。简单问题生成一个计划步骤，归因问题最多五个可展示步骤。
+- Agent Core 维护显式请求状态，包括会话与请求标识、用户问题、分析计划、当前步骤、Agent 上下文、工具轮数、业务 SQL 次数、重试次数、Evidence、生成组件和终态。
+- Agent 状态流为 Understand、必要时 Clarify、Assemble、Plan、Act、Observe、Synthesize、Remember。简单问题生成一个计划步骤，归因问题最多五个可展示步骤。
 - 每个请求最多十轮工具调用、五次业务 SQL；同一目的的 SQL 最多修正两次。预算耗尽后返回已有证据、未完成步骤和停止原因。
 - Tool Registry 只提供 `run_sql`、`visualize_data` 和 `search_memory`。所有工具参数使用 Pydantic 契约校验。
 - Candidate 保存不是 LLM 工具。后端在最终 Evidence 确定后登记符合门槛的成功 SQL，避免让 Agent 自己决定何为可信记忆。

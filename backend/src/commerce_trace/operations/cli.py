@@ -227,6 +227,11 @@ def parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "--no-data", action="store_true", help="Skip data generation"
     )
+    init_parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="Generate data only when no initialized dataset exists",
+    )
     return root
 
 
@@ -244,11 +249,13 @@ async def main() -> None:
         await ablation(settings, limit=args.limit)
     elif args.command == "init":
         migrate(settings)
-        if not args.no_data:
+        if args.no_data:
+            print("Environment initialized without data.")
+        elif args.if_empty and dataset_exists(settings):
+            print("Environment already contains data; skipped data generation.")
+        else:
             generate_data(settings, profile=args.profile)
             print("Environment initialized with data.")
-        else:
-            print("Environment initialized without data.")
     else:
         raise NotImplementedError(f"unknown command: {args.command}")
 

@@ -136,7 +136,7 @@ def format_golden_examples(examples: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-class RetrievedContext(BaseModel):
+class AgentContext(BaseModel):
     schema_catalog: dict[str, Any]
     schema_fingerprint: str
     schema_version: str
@@ -217,7 +217,7 @@ class ContextAssembler:
         self.include_golden_examples = include_golden_examples
         self.schema_provider = schema_provider or StaticSchemaProvider()
 
-    async def assemble(self) -> RetrievedContext:
+    async def assemble(self) -> AgentContext:
         schema_catalog = await self.schema_provider.load()
         if self.include_knowledge:
             rules, metrics, knowledge_version = self.knowledge_loader.load()
@@ -226,7 +226,7 @@ class ContextAssembler:
         golden_examples: list[dict[str, str]] = []
         if self.include_golden_examples and self.knowledge_loader.root is not None:
             golden_examples = load_golden_examples(self.knowledge_loader.root)
-        return RetrievedContext(
+        return AgentContext(
             schema_catalog=schema_catalog,
             schema_fingerprint=schema_fingerprint(schema_catalog),
             schema_version=str(schema_catalog["version"]),

@@ -1,6 +1,6 @@
 export type EventName =
   | 'conversation.started'
-  | 'context.retrieved'
+  | 'context.assembled'
   | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'

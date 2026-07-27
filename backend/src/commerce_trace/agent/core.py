@@ -118,7 +118,7 @@ class Agent:
             return
 
         try:
-            retrieved = await self.context_assembler.assemble()
+            context = await self.context_assembler.assemble()
         except Exception:
             state.finish(RequestPhase.FAILED)
             yield await self._make_event(
@@ -137,12 +137,12 @@ class Agent:
             user_id=user_id,
             conversation_id=conversation_id,
             request_id=request_id,
-            event=EventType.CONTEXT_RETRIEVED,
+            event=EventType.CONTEXT_ASSEMBLED,
             payload={
-                "schema_version": retrieved.schema_version,
-                "schema_fingerprint": retrieved.schema_fingerprint,
-                "knowledge_version": retrieved.knowledge_version,
-                "degraded": retrieved.degraded,
+                "schema_version": context.schema_version,
+                "schema_fingerprint": context.schema_fingerprint,
+                "knowledge_version": context.knowledge_version,
+                "degraded": context.degraded,
             },
         )
 
@@ -152,7 +152,7 @@ class Agent:
             response = await self.llm.complete(
                 state.messages,
                 self.registry.schemas(),
-                SYSTEM_PROMPT + "\n\n" + retrieved.prompt_section(),
+                SYSTEM_PROMPT + "\n\n" + context.prompt_section(),
             )
             state.record_llm_usage(response.usage)
             if not response.tool_calls:

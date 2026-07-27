@@ -4,7 +4,7 @@ import pytest
 
 from commerce_trace.config import Settings
 from commerce_trace.contracts import EventType
-from commerce_trace.operations.cli import dataset_exists, generate_data, migrate
+from commerce_trace.operations.cli import dataset_exists, generate_data, migrate, parser
 from commerce_trace.persistence import (
     SQLiteResources,
     SQLiteSchemaProvider,
@@ -13,6 +13,14 @@ from commerce_trace.persistence import (
 )
 from commerce_trace.runtime import build_runtime
 from commerce_trace.testing import ScriptedLlm
+
+
+def test_init_parser_supports_if_empty() -> None:
+    args = parser().parse_args(["init", "--profile", "test", "--if-empty"])
+
+    assert args.command == "init"
+    assert args.profile == "test"
+    assert args.if_empty is True
 
 
 async def test_sqlite_store_opens_migrates_and_loads_schema(tmp_path: Path) -> None:

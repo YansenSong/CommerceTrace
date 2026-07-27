@@ -240,7 +240,7 @@ class RequestState:
     request_id: str
     question: str
     phase: RequestPhase = STARTED
-    retrieved: RetrievedContext | None    # 装配的上下文
+    context: AgentContext | None          # 装配的上下文
     plan: list[PlanStep]                  # 执行计划
     messages: list[LlmMessage]            # LLM 对话消息
     tool_context: ToolExecutionContext    # 工具执行上下文
@@ -624,14 +624,14 @@ class ContextAssembler:
 ### 7.2 装配内容
 
 ```python
-class RetrievedContext:
+class AgentContext:
     schema_catalog: dict[str, Any]       # 数据库 Schema 定义
     schema_fingerprint: str              # Schema SHA-256 指纹
     schema_version: str                  # Schema 版本
     knowledge_version: str               # 知识库版本
     rules: list[dict[str, Any]]          # 业务规则
     metrics: list[dict[str, Any]]        # 指标定义
-    memories: list[MemorySearchResult]   # 检索到的记忆
+    golden_examples: list[dict[str, str]] # Golden SQL 示例
     degraded: bool                       # 降级标记
 ```
 
@@ -646,14 +646,6 @@ def prompt_section(self) -> str:
         "schema_fingerprint": self.schema_fingerprint,
         "business_rules": self.rules,
         "metrics": self.metrics,
-        "retrieved_memory": [
-            {
-                "label": item.label,       # trusted | unverified_candidate
-                "question": item.record.question,
-                "sql": item.record.normalized_sql,
-            }
-            for item in self.memories
-        ],
     }
     return json.dumps(payload, ensure_ascii=False)
 ```
@@ -971,7 +963,7 @@ Agent 运行全程通过 SSE 推送事件：
 
 ```
 event: conversation.started     → 对话开始，包含问题
-event: context.retrieved        → 上下文装配完成
+event: context.assembled        → 上下文装配完成
 event: plan.created             → 计划生成
 event: plan.step_started        → 步骤开始
 event: tool.started             → 工具调用开始
@@ -1083,7 +1075,7 @@ COMMERCE_TRACE_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
   │   │       └─ ChromaMemoryIndex.search() + token similarity
   │   │           → 2 trusted memories + 1 candidate memory
   │   │
-  │   ├─ [Event] CONTEXT_RETRIEVED
+  │   ├─ [Event] CONTEXT_ASSEMBLED
   │   ├─ _plan() → 3-step attribution plan
   │   ├─ [Event] PLAN_CREATED
   │   │
