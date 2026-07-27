@@ -18,3 +18,5 @@ data/
 reports/*.json
 reports/*.md
 !.scratch/commerce-trace-mvp/issues/*.md
+.codex/
+.claude/
