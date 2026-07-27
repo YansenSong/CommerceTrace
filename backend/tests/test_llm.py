@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from commerce_trace.contracts import LlmMessage, ToolSchema
-from commerce_trace.llm import OpenAICompatibleLlm
+from commerce_trace.agent.llm import OpenAICompatibleLlm
 
 
 async def test_deepseek_request_disables_thinking_and_parses_tool_call() -> None:

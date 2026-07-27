@@ -1,6 +1,6 @@
 import pytest
 
-from commerce_trace.sql_safety import SqlSafetyError, SqlSafetyPolicy
+from commerce_trace.agent.sql_safety import SqlSafetyError, SqlSafetyPolicy
 
 
 @pytest.fixture

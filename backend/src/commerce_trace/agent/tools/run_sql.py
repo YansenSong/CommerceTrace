@@ -5,7 +5,7 @@ import json
 import time
 
 from ...contracts import Evidence, ToolFailure, ToolSuccess
-from ...sql_safety import SqlSafetyError, SqlSafetyPolicy
+from ..sql_safety import SqlSafetyError, SqlSafetyPolicy
 from .base import SqlExecutor, Tool, ToolContext
 from .models import RunSqlArgs
 

@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ...contracts import ToolFailure, ToolResult, ToolSchema, ToolSuccess
-from ...sql_safety import SqlSafetyPolicy
+from ..sql_safety import SqlSafetyPolicy
 from .base import SqlExecutor, Tool, ToolContext
 from .run_sql import RunSqlTool
 from .visualize_data import VisualizeDataTool

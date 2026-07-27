@@ -156,19 +156,14 @@ async def evaluate(settings: Settings, *, limit: int | None) -> None:
 
 async def ablation(settings: Settings, *, limit: int | None) -> None:
     variants = {
-        "A_schema_and_system_prompt": FeatureConfiguration(
+        "A_schema_only": FeatureConfiguration(
             include_knowledge=False,
-            include_golden_examples=False,
             enable_sql_retries=False,
         ),
         "B_with_business_rules": FeatureConfiguration(
-            include_golden_examples=False,
             enable_sql_retries=False,
         ),
-        "C_with_golden_examples": FeatureConfiguration(
-            enable_sql_retries=False,
-        ),
-        "D_execution_feedback_and_correction": FeatureConfiguration(),
+        "C_with_sql_retries": FeatureConfiguration(),
     }
     dataset = load_dataset(project_path(settings.eval_dataset_path))
     runs: dict[str, EvaluationReport] = {}

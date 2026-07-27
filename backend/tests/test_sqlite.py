@@ -12,7 +12,7 @@ from commerce_trace.persistence import (
     SQLiteStore,
 )
 from commerce_trace.runtime import build_runtime
-from commerce_trace.testing import ScriptedLlm
+from commerce_trace.agent.testing import ScriptedLlm
 
 
 def test_init_parser_supports_if_empty() -> None:

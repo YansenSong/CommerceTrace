@@ -29,5 +29,4 @@ class Settings(BaseSettings):
     max_distinct_values: int = Field(default=50, ge=1, le=100)
     schema_version: str = "1.0.0"
     knowledge_version: str = "1.0.0"
-    knowledge_path: Path = Path("knowledge")
     eval_dataset_path: Path = Path("evals/datasets/mvp.yaml")

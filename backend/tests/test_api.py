@@ -2,7 +2,7 @@ from httpx import ASGITransport, AsyncClient
 
 from commerce_trace.api import create_app
 from commerce_trace.persistence import InMemoryStore
-from commerce_trace.testing import build_test_agent
+from commerce_trace.agent.testing import build_test_agent
 
 
 async def test_chat_is_sse_and_cookie_restores_isolated_history() -> None:

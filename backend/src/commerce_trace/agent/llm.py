@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import httpx
 
-from .contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
+from ..contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
 
 
 def _http_proxy_from_environment() -> str | None:

@@ -1,4 +1,5 @@
-from commerce_trace.context import ContextAssembler, schema_fingerprint
+from commerce_trace.agent.context import ContextAssembler
+from commerce_trace.agent.prompt import schema_fingerprint
 
 
 async def test_context_contains_complete_versioned_schema_before_model_use() -> None:

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from .agent import Agent
-from .agent.tools import FakeSqlExecutor, build_default_registry
+from .core import Agent
+from .tools import FakeSqlExecutor, build_default_registry
 from .context import ContextAssembler
-from .contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
+from ..contracts import LlmMessage, LlmResponse, ToolCall, ToolSchema
 from .llm import LlmService
-from .persistence import InMemoryStore
+from ..persistence import InMemoryStore
 
 
 class ScriptedLlm(LlmService):

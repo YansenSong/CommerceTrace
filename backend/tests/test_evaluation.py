@@ -2,7 +2,7 @@ from pathlib import Path
 
 from commerce_trace.operations.evaluation import load_dataset, run_evaluation
 from commerce_trace.persistence import InMemoryStore
-from commerce_trace.testing import build_test_agent
+from commerce_trace.agent.testing import build_test_agent
 
 
 async def test_evaluation_uses_behavioral_labels_and_computes_report() -> None:

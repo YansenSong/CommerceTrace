@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .agent import Agent
+from .agent.context import ContextAssembler
+from .agent.llm import LlmService, OpenAICompatibleLlm
+from .agent.sql_safety import SqlSafetyPolicy
 from .agent.tools import build_default_registry
 from .config import Settings
-from .context import ContextAssembler, KnowledgeLoader
-from .llm import LlmService, OpenAICompatibleLlm
-from .persistence import SQLiteResources, SQLiteSchemaProvider, SQLiteSqlExecutor, SQLiteStore
-from .sql_safety import SqlSafetyPolicy
+from .persistence import SQLiteResources, SQLiteSqlExecutor, SQLiteStore
 
 
 @dataclass
@@ -22,7 +22,6 @@ class Runtime:
 @dataclass(frozen=True)
 class FeatureConfiguration:
     include_knowledge: bool = True
-    include_golden_examples: bool = True
     enable_sql_retries: bool = True
 
 
@@ -62,10 +61,7 @@ def build_runtime(
         llm=llm,
         registry=build_default_registry(executor=executor, policy=policy),
         context_assembler=ContextAssembler(
-            knowledge_loader=KnowledgeLoader(_project_path(settings.knowledge_path)),
             include_knowledge=features.include_knowledge,
-            include_golden_examples=features.include_golden_examples,
-            schema_provider=SQLiteSchemaProvider(resources),
         ),
         store=store,
         max_tool_iterations=settings.max_tool_iterations,

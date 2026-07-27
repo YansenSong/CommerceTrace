@@ -1,11 +1,11 @@
 from commerce_trace.agent import Agent
 from commerce_trace.agent.synthesis import synthesize
 from commerce_trace.agent.tools import FakeSqlExecutor, build_default_registry
-from commerce_trace.context import ContextAssembler
+from commerce_trace.agent.context import ContextAssembler
 from commerce_trace.contracts import EventType, Evidence, LlmResponse, ToolCall
-from commerce_trace.llm import LlmService
+from commerce_trace.agent.llm import LlmService
 from commerce_trace.persistence import InMemoryStore
-from commerce_trace.testing import ScriptedLlm
+from commerce_trace.agent.testing import ScriptedLlm
 
 
 def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() -> None:

@@ -17,6 +17,6 @@ chroma_data/
 data/
 reports/*.json
 reports/*.md
-!.scratch/commerce-trace-mvp/issues/*.md
 .codex/
 .claude/
+.agents
