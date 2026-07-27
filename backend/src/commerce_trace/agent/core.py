@@ -6,9 +6,7 @@ from typing import Any
 
 from ..context import ContextAssembler
 from ..contracts import (
-    Chart,
     EventType,
-    Evidence,
     LlmMessage,
     StreamEvent,
     ToolFailure,
@@ -147,6 +145,8 @@ class Agent:
         )
 
         state.prepare_execution()
+        assert state.tool_context is not None
+        state.tool_context.store = self.store
 
         while state.tool_iterations < self.max_tool_iterations:
             response = await self.llm.complete(
@@ -167,8 +167,10 @@ class Agent:
             )
             for call in response.tool_calls:
                 purpose = str(call.arguments.get("purpose", "未声明目的"))
+                tool_kind = self.registry.tool_kind(call.name)
                 if not state.begin_tool(
                     name=call.name,
+                    kind=tool_kind,
                     purpose=purpose,
                     max_tool_iterations=self.max_tool_iterations,
                     max_business_sql_calls=self.max_business_sql_calls,
@@ -196,11 +198,12 @@ class Agent:
                     },
                 )
                 assert state.tool_context is not None
+                state.tool_context.tool_call_id = call.id
                 result = await self.registry.execute(
                     call.name, call.arguments, state.tool_context
                 )
                 if isinstance(result, ToolFailure):
-                    state.record_tool_failure(call.name, purpose)
+                    state.record_tool_failure(tool_kind, purpose)
                     await self.store.save_tool_result(
                         user_id,
                         call.id,
@@ -232,7 +235,7 @@ class Agent:
                             ),
                         )
                     )
-                    if call.name == "run_sql" and not self.enable_sql_retries:
+                    if tool_kind == "business_sql" and not self.enable_sql_retries:
                         state.incomplete_reason = "sql_retry_disabled"
                         break
                     continue
@@ -244,20 +247,6 @@ class Agent:
                     success=True,
                     summary={"data": result.data},
                 )
-                if call.name == "run_sql":
-                    created = self._evidence_from_result(
-                        call_id=call.id,
-                        step=str(call.arguments.get("purpose", "SQL查询")),
-                        result=result,
-                    )
-                    state.add_evidence(created)
-                    result.data["evidence_id"] = created.evidence_id
-                    result_id = result.data.get("result_id")
-                    if result_id in state.tool_context.query_results:
-                        state.tool_context.query_results[result_id][
-                            "evidence_id"
-                        ] = created.evidence_id
-                    await self.store.save_evidence(user_id, conversation_id, request_id, created)
                 yield await self._make_event(
                     user_id=user_id,
                     conversation_id=conversation_id,
@@ -269,17 +258,19 @@ class Agent:
                         "data": result.data,
                     },
                 )
-                if call.name == "run_sql":
+                # Lifecycle hooks (on_success) already persisted results to store
+                # and pushed Evidence / Chart objects into context lists.
+                for evidence in state.tool_context.created_evidence:
+                    state.add_evidence(evidence)
                     yield await self._make_event(
                         user_id=user_id,
                         conversation_id=conversation_id,
                         request_id=request_id,
                         event=EventType.EVIDENCE_CREATED,
-                        payload=state.evidence[-1].model_dump(mode="json"),
+                        payload=evidence.model_dump(mode="json"),
                     )
-                elif call.name == "visualize_data":
-                    chart = Chart.model_validate(result.data["chart"])
-                    await self.store.save_chart(user_id, conversation_id, request_id, chart)
+                state.tool_context.created_evidence.clear()
+                for chart in state.tool_context.created_charts:
                     yield await self._make_event(
                         user_id=user_id,
                         conversation_id=conversation_id,
@@ -287,6 +278,7 @@ class Agent:
                         event=EventType.CHART_CREATED,
                         payload=chart.model_dump(mode="json"),
                     )
+                state.tool_context.created_charts.clear()
                 state.messages.append(
                     LlmMessage(
                         role="tool",
@@ -390,24 +382,3 @@ class Agent:
             "expected_columns": arguments.get("expected_columns", []),
         }
 
-    @staticmethod
-    def _evidence_from_result(*, call_id: str, step: str, result: ToolSuccess) -> Evidence:
-        data = result.data
-        preview = data.get("preview", [])
-        if preview:
-            first = preview[0]
-            values = "，".join(f"{key}={value}" for key, value in first.items())
-            claim = f"{data['purpose']}：{values}"
-        else:
-            claim = f"{data['purpose']}：当前条件下无结果"
-        return Evidence(
-            analysis_step=step,
-            tool_call_id=call_id,
-            claim=claim,
-            sql=data["sql"],
-            columns=data["columns"],
-            row_count=data["row_count"],
-            result_hash=data["result_hash"],
-            execution_time_ms=data["execution_time_ms"],
-            preview=preview,
-        )

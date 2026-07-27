@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd *)",
+      "Bash(python -m pytest tests/test_tools.py tests/test_agent_state.py -v)",
+      "Bash(uv run *)"
+    ]
+  }
+}

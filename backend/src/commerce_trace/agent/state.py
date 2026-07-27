@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..contracts import Evidence, LlmMessage
-from .tools import ToolExecutionContext
+from .tools import ToolContext
 
 
 class RequestPhase(str, Enum):
@@ -48,7 +48,7 @@ class RequestState:
     question: str
     phase: RequestPhase = RequestPhase.STARTED
     messages: list[LlmMessage] = field(default_factory=list)
-    tool_context: ToolExecutionContext | None = None
+    tool_context: ToolContext | None = None
     evidence: list[Evidence] = field(default_factory=list)
     retry_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     incomplete_reason: str | None = None
@@ -72,7 +72,11 @@ class RequestState:
     def prepare_execution(self) -> None:
         self.transition_to(RequestPhase.EXECUTING)
         self.messages = [LlmMessage(role="user", content=self.question)]
-        self.tool_context = ToolExecutionContext()
+        self.tool_context = ToolContext(
+            user_id=self.user_id,
+            conversation_id=self.conversation_id,
+            request_id=self.request_id,
+        )
 
     def record_llm_usage(self, usage: dict[str, int]) -> None:
         self.llm_calls += 1
@@ -83,6 +87,7 @@ class RequestState:
         self,
         *,
         name: str,
+        kind: str,
         purpose: str,
         max_tool_iterations: int,
         max_business_sql_calls: int,
@@ -91,7 +96,7 @@ class RequestState:
         if self.tool_iterations >= max_tool_iterations:
             self.incomplete_reason = "tool_iteration_limit"
             return False
-        if name == "run_sql":
+        if kind == "business_sql":
             if self.sql_calls >= max_business_sql_calls:
                 self.incomplete_reason = "business_sql_limit"
                 return False
@@ -102,8 +107,8 @@ class RequestState:
         self.tool_iterations += 1
         return True
 
-    def record_tool_failure(self, name: str, purpose: str) -> None:
-        if name == "run_sql":
+    def record_tool_failure(self, kind: str, purpose: str) -> None:
+        if kind == "business_sql":
             self.retry_counts[purpose] += 1
 
     def add_evidence(self, evidence: Evidence) -> None:

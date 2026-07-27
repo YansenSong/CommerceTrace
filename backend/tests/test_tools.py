@@ -1,8 +1,9 @@
 import pytest
 
 from commerce_trace.agent.tools import (
-    ToolExecutionContext,
+    ToolContext,
     ToolRegistry,
+    VisualizeDataArgs,
     VisualizeDataTool,
 )
 from commerce_trace.contracts import ToolFailure, ToolSuccess
@@ -21,7 +22,7 @@ async def test_visualize_data_supports_only_controlled_plotly_contracts(
     chart_type: str,
     arguments: dict[str, str],
 ) -> None:
-    context = ToolExecutionContext(
+    context = ToolContext(
         query_results={
             "result-1": {
                 "evidence_id": "ev-1",
@@ -33,7 +34,7 @@ async def test_visualize_data_supports_only_controlled_plotly_contracts(
 
     result = await VisualizeDataTool().execute(
         context,
-        VisualizeDataTool.args_model(
+        VisualizeDataArgs(
             evidence_id="ev-1",
             chart_type=chart_type,
             title="经营结果",
@@ -47,10 +48,10 @@ async def test_visualize_data_supports_only_controlled_plotly_contracts(
 
 async def test_visualize_data_rejects_missing_evidence_and_fields() -> None:
     tool = VisualizeDataTool()
-    context = ToolExecutionContext()
+    context = ToolContext()
     missing = await tool.execute(
         context,
-        tool.args_model(
+        VisualizeDataArgs(
             evidence_id="another-request",
             chart_type="bar",
             title="无权图表",
@@ -73,7 +74,7 @@ async def test_registry_owns_registration_and_argument_validation() -> None:
     result = await registry.execute(
         "visualize_data",
         {"chart_type": "bar"},
-        ToolExecutionContext(),
+        ToolContext(),
     )
 
     assert isinstance(result, ToolFailure)

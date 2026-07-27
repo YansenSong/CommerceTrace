@@ -37,6 +37,7 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
 
     assert state.begin_tool(
         name="run_sql",
+        kind="business_sql",
         purpose="按地区统计销售额",
         max_tool_iterations=3,
         max_business_sql_calls=1,
@@ -57,6 +58,7 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
 
     assert not state.begin_tool(
         name="run_sql",
+        kind="business_sql",
         purpose="补充地区统计",
         max_tool_iterations=3,
         max_business_sql_calls=1,
