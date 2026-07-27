@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from commerce_trace.config import Settings
-from commerce_trace.contracts import EventType
+from commerce_trace.models import EventType
 from commerce_trace.operations.cli import dataset_exists, generate_data, migrate, parser
 from commerce_trace.persistence import (
     SQLiteResources,

@@ -1,4 +1,4 @@
-from commerce_trace.contracts import EventType, StreamEvent
+from commerce_trace.models import EventType, StreamEvent
 
 
 def test_stream_event_has_stable_sse_envelope() -> None:

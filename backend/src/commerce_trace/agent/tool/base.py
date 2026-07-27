@@ -5,7 +5,7 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
-from ...contracts import Chart, Evidence, ToolFailure, ToolResult, ToolSchema, ToolSuccess
+from ...models import Chart, Evidence, ToolFailure, ToolResult, ToolSchema, ToolSuccess
 
 
 class ToolContext(BaseModel):

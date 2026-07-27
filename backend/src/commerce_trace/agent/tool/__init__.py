@@ -1,10 +1,10 @@
 """Agent tool definitions and registration."""
 
 from .base import FakeSqlExecutor, SqlExecutor, Tool, ToolContext
-from .models import RunSqlArgs, VisualizeDataArgs
+from .tools.args import RunSqlArgs, VisualizeDataArgs
 from .registry import ToolRegistry, build_default_registry
-from .run_sql import RunSqlTool
-from .visualize_data import VisualizeDataTool
+from .tools.run_sql import RunSqlTool
+from .tools.visualize_data import VisualizeDataTool
 
 # Backward-compatible alias
 ToolExecutionContext = ToolContext

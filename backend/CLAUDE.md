@@ -105,19 +105,3 @@
 | `operations/evaluation.py` | `EvaluationDataset`/`EvaluationCase`/`CaseResult`/`EvaluationReport` 模型；`run_evaluation()` 驱动 Agent 跑数据集并计算通过率/证据完整性/SQL 成功率；支持消融报告 |
 
 ---
-
-## 测试 (`tests/`)
-
-| 文件 | 作用 |
-|---|---|
-| `tests/conftest.py` | 设置 `COMMERCE_TRACE_ENVIRONMENT=test` |
-| `tests/test_contracts.py` | SSE 事件序列化 |
-| `tests/test_context.py` | Context 装配和 schema 指纹 |
-| `tests/test_llm.py` | LLM 客户端请求/响应格式 |
-| `tests/test_sql_safety.py` | SQL 安全策略（10 个参数化测试） |
-| `tests/test_tools.py` | 工具执行和注册（图表类型、缺失 evidence、重复注册、参数验证） |
-| `tests/test_agent_state.py` | 请求状态机和工具预算 |
-| `tests/test_agent_stream.py` | Agent 端到端流（问候/简单问答/SQL 重试/预算上限），含 ScriptedLlm |
-| `tests/test_api.py` | FastAPI 集成测试：SSE 流、cookie 认证、对话隔离、历史回放 |
-| `tests/test_sqlite.py` | SQLite 持久化和执行器边界测试 |
-| `tests/test_evaluation.py` | 评估框架单元测试 |

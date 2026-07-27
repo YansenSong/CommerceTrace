@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from .context import ContextAssembler
-from ..contracts import (
+from ..models import (
     EventType,
     LlmMessage,
     StreamEvent,
@@ -16,7 +16,7 @@ from .llm import LlmService
 from ..persistence import ConversationLedger
 from .state import RequestPhase, RequestState
 from .synthesis import synthesize
-from .tools import ToolRegistry
+from .tool import ToolRegistry
 from .prompt import SYSTEM_PROMPT
 
 

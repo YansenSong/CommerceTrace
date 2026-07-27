@@ -12,7 +12,7 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
 from ..agent import Agent
-from ..contracts import EventType, StreamEvent
+from ..models import EventType, StreamEvent
 
 
 class EvaluationCase(BaseModel):

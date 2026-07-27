@@ -3,7 +3,7 @@ from typing import Any
 
 import httpx
 
-from commerce_trace.contracts import LlmMessage, ToolSchema
+from commerce_trace.models import LlmMessage, ToolSchema
 from commerce_trace.agent.llm import OpenAICompatibleLlm
 
 

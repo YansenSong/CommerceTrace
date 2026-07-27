@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...contracts import Chart, ToolFailure, ToolSuccess
-from .base import Tool, ToolContext
-from .models import VisualizeDataArgs
+from ....models import Chart, ToolFailure, ToolSuccess
+from ..base import Tool, ToolContext
+from .args import VisualizeDataArgs
 
 
 class VisualizeDataTool(Tool[VisualizeDataArgs]):

@@ -4,8 +4,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..contracts import Evidence, LlmMessage
-from .tools import ToolContext
+from ..models import Evidence, LlmMessage
+from .tool import ToolContext
 
 
 class RequestPhase(str, Enum):

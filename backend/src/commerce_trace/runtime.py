@@ -7,7 +7,7 @@ from .agent import Agent
 from .agent.context import ContextAssembler
 from .agent.llm import LlmService, OpenAICompatibleLlm
 from .agent.sql_safety import SqlSafetyPolicy
-from .agent.tools import build_default_registry
+from .agent.tool import build_default_registry
 from .config import Settings
 from .persistence import SQLiteResources, SQLiteSqlExecutor, SQLiteStore
 

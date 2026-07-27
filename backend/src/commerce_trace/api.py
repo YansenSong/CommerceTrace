@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from .agent import Agent
 from .config import Settings
-from .contracts import ChatRequest
+from .models import ChatRequest
 from .persistence import ConversationLedger, InMemoryStore
 from .agent.testing import build_test_agent
 

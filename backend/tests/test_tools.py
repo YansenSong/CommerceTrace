@@ -1,12 +1,12 @@
 import pytest
 
-from commerce_trace.agent.tools import (
+from commerce_trace.agent.tool import (
     ToolContext,
     ToolRegistry,
     VisualizeDataArgs,
     VisualizeDataTool,
 )
-from commerce_trace.contracts import ToolFailure, ToolSuccess
+from commerce_trace.models import ToolFailure, ToolSuccess
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from ..contracts import Evidence
+from ..models import Evidence
 
 EVIDENCE_REFERENCE_RE = re.compile(r"\[(ev_[A-Za-z0-9_-]+)\]")
 CHART_MARKDOWN_REFERENCE_RE = re.compile(

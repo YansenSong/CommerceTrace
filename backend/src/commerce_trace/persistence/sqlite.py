@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from ..agent.prompt import SCHEMA_CATALOG
-from ..contracts import Chart, EventType, Evidence, StreamEvent
+from ..models import Chart, EventType, Evidence, StreamEvent
 
 ResultT = TypeVar("ResultT")
 

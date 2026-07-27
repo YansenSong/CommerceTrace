@@ -1,7 +1,7 @@
 import pytest
 
 from commerce_trace.agent.state import RequestPhase, RequestState
-from commerce_trace.contracts import Evidence
+from commerce_trace.models import Evidence
 
 
 def build_state() -> RequestState:

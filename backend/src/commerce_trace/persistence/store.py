@@ -4,7 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import Any, Protocol
 
-from ..contracts import Chart, Evidence, StreamEvent, utc_now
+from ..models import Chart, Evidence, StreamEvent, utc_now
 
 
 class ConversationLedger(Protocol):

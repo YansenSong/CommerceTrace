@@ -1,8 +1,8 @@
 from commerce_trace.agent import Agent
 from commerce_trace.agent.synthesis import synthesize
-from commerce_trace.agent.tools import FakeSqlExecutor, build_default_registry
+from commerce_trace.agent.tool import FakeSqlExecutor, build_default_registry
 from commerce_trace.agent.context import ContextAssembler
-from commerce_trace.contracts import EventType, Evidence, LlmResponse, ToolCall
+from commerce_trace.models import EventType, Evidence, LlmResponse, ToolCall
 from commerce_trace.agent.llm import LlmService
 from commerce_trace.persistence import InMemoryStore
 from commerce_trace.agent.testing import ScriptedLlm
