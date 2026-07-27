@@ -27,22 +27,22 @@ CommerceTrace 是一个面向中文电商经营分析的、证据驱动的单 Ag
 
 ```bash
 cp .env.example .env
-make sync
-make init
+npm run sync
+npm run init
 ```
 
 启动后端前，请在 `.env` 中填写 `COMMERCE_TRACE_DEEPSEEK_API_KEY`。真实密钥只应保存在本地 `.env`，不要提交到 Git。
 
-`make init` 会依次执行 SQLite 迁移、固定种子数据生成和 Trusted Memory 载入。默认检索直接使用 SQLite 权威记录，不需要独立数据库服务。
+`npm run init` 会依次执行 SQLite 迁移、固定种子数据生成和 Trusted Memory 载入。默认检索直接使用 SQLite 权威记录，不需要独立数据库服务。
 
 分别打开两个终端启动后端和前端：
 
 ```bash
-make backend
+npm run backend
 ```
 
 ```bash
-make frontend
+npm run frontend
 ```
 
 就绪后访问：
@@ -131,10 +131,10 @@ Agent 在首次模型调用前装配完整 Schema 与相关业务上下文。工
 ## 测试与构建
 
 ```bash
-make test
-make lint
-make typecheck
-make build
+npm run test
+npm run lint
+npm run typecheck
+npm run build
 ```
 
 等价的后端完整测试命令：
@@ -150,7 +150,7 @@ uv run pytest -p pytest_asyncio.plugin tests ../data_generator/test_generate.py
 
 ## 评测、记忆回放与实验
 
-以下命令需要先执行 `make init`。所有报告同时记录数据种子、模型模式、知识版本和 Schema 版本，输出到未纳入版本控制的 `reports/`。
+以下命令需要先执行 `npm run init`。所有报告同时记录数据种子、模型模式、知识版本和 Schema 版本，输出到未纳入版本控制的 `reports/`。
 
 ```bash
 # 运行约 60 个中文问题；调试时可加 --limit 10
@@ -196,9 +196,9 @@ CommerceTrace 没有复制 Vanna 的框架代码，也没有尝试重建其平�
 
 ## 常见问题
 
-- `database: unavailable`：执行 `make init`，并确认当前用户对 `data/` 具有读写权限。
+- `database: unavailable`：执行 `npm run init`，并确认当前用户对 `data/` 具有读写权限。
 - `dataset: missing`：执行 `commerce-trace generate-data --profile test`。
 - `knowledge: missing`：执行 `commerce-trace bootstrap-memory`，需要时再运行 `rebuild-memory-index`。
 - 需要 BGE/Chroma 语义索引时，额外执行 `uv sync --project backend --extra memory` 和 `commerce-trace rebuild-memory-index`；默认 SQLite 检索不需要这些依赖。
-- 本地 UV 缓存不可写：像 Makefile 一样设置 `UV_CACHE_DIR=/tmp/commerce-trace-uv-cache`。
+- 本地 UV 缓存不可写：设置 `UV_CACHE_DIR=/tmp/commerce-trace-uv-cache` 环境变量。
 - 浏览器没有历史：匿名身份存于 HttpOnly Cookie；更换浏览器配置或清除 Cookie 会得到新的隔离身份。

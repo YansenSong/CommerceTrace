@@ -36,7 +36,7 @@ test = [
 ]
 
 [project.scripts]
-commerce-trace = "commerce_trace.operations.cli:main"
+commerce-trace = "commerce_trace.operations.cli:main_sync"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/commerce_trace"]

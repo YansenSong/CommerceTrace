@@ -254,3 +254,7 @@ async def main() -> None:
             print("Environment initialized without data.")
     else:
         raise NotImplementedError(f"unknown command: {args.command}")
+
+
+def main_sync() -> None:
+    asyncio.run(main())

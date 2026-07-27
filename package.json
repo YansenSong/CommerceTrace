@@ -1,0 +1,22 @@
+{
+  "name": "commerce-trace",
+  "private": true,
+  "scripts": {
+    "sync": "cd backend && uv sync --extra test --extra data && cd ../frontend && npm install",
+    "init": "uv run --project backend commerce-trace init --profile test --if-empty",
+    "backend": "uv run --project backend uvicorn commerce_trace.api:app --reload --port 8000",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "npm run backend & npm run frontend",
+    "test": "cd backend && UV_CACHE_DIR=/tmp/commerce-trace-uv-cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.. uv run pytest -p pytest_asyncio.plugin tests ../data_generator/test_generate.py && cd ../frontend && npm test",
+    "test:backend": "cd backend && UV_CACHE_DIR=/tmp/commerce-trace-uv-cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.. uv run pytest -p pytest_asyncio.plugin tests ../data_generator/test_generate.py",
+    "test:frontend": "cd frontend && npm test",
+    "typecheck": "cd backend && uv run mypy src/commerce_trace && cd ../frontend && npm run typecheck",
+    "typecheck:backend": "cd backend && uv run mypy src/commerce_trace",
+    "typecheck:frontend": "cd frontend && npm run typecheck",
+    "lint": "cd backend && uv run ruff check src tests ../data_generator",
+    "build": "cd frontend && npm run build",
+    "evaluate": "uv run --project backend commerce-trace evaluate",
+    "replay-memory": "uv run --project backend commerce-trace replay-memory",
+    "ablation": "uv run --project backend commerce-trace ablation"
+  }
+}
