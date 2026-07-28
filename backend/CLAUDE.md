@@ -10,7 +10,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `contracts.py` | 全项目共享的 Pydantic 模型和类型：`StreamEvent`（SSE 事件）、`ToolCall`、`ToolSchema`、`ToolSuccess`/`ToolFailure`、`LlmMessage`/`LlmResponse`、`Evidence`（查询证据）、`Chart`（图表） |
+| `contracts.py` | 全项目共享的 Pydantic 模型和类型：`StreamEvent`（SSE 事件）、`ToolCall`、`ToolSchema`、`ToolSuccess`/`ToolFailure`、`LLMMessage`/`LLMResponse`、`Evidence`（查询证据）、`Chart`（图表） |
 | `config.py` | `Settings` 类，通过 `COMMERCE_TRACE_` 前缀环境变量和 `.env` 文件加载所有配置项（数据库路径、模型参数、超时、限额等） |
 
 ### 运行时装配
@@ -42,7 +42,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `agent/llm.py` | `LlmService` 抽象 + `OpenAICompatibleLlm` 实现，将 `ToolSchema` 列表转换为 OpenAI function calling 格式，支持 HTTP 代理 |
+| `agent/llm.py` | `LLMService` 抽象 + `OpenAICompatibleLLM` 实现，将 `ToolSchema` 列表转换为 OpenAI function calling 格式，支持 HTTP 代理 |
 
 ### 系统提示词 (`agent/prompt/`)
 
@@ -82,7 +82,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `agent/testing.py` | `ScriptedLlm`（确定性 LLM，始终返回 run_sql 工具调用，失败时可重试一次）；`build_test_agent()`（用 FakeSqlExecutor + InMemoryStore 快速构建测试 Agent） |
+| `agent/testing.py` | `ScriptedLLM`（确定性 LLM，始终返回 run_sql 工具调用，失败时可重试一次）；`build_test_agent()`（用 FakeSqlExecutor + InMemoryStore 快速构建测试 Agent） |
 
 ---
 

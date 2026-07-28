@@ -3,8 +3,8 @@ from typing import Any
 
 import httpx
 
-from commerce_trace.models import LlmMessage, ToolSchema
-from commerce_trace.agent.llm import OpenAICompatibleLlm
+from commerce_trace.models import LLMMessage, ToolSchema
+from commerce_trace.agent.llm import OpenAICompatibleLLM
 
 
 async def test_deepseek_request_disables_thinking_and_parses_tool_call() -> None:
@@ -41,18 +41,18 @@ async def test_deepseek_request_disables_thinking_and_parses_tool_call() -> None
                         }
                     }
                 ],
-                "usage": {"prompt_tokens": 12, "completion_tokens": 7},
+                "usage": {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19},
             },
         )
 
-    llm = OpenAICompatibleLlm(
+    llm = OpenAICompatibleLLM(
         base_url="https://api.deepseek.com",
         api_key="test-key",
         model="deepseek-v4-flash",
         transport=httpx.MockTransport(handler),
     )
     response = await llm.complete(
-        messages=[LlmMessage(role="user", content="销售额是多少？")],
+        messages=[LLMMessage(role="user", content="销售额是多少？")],
         tools=[
             ToolSchema(
                 name="run_sql",
@@ -70,4 +70,4 @@ async def test_deepseek_request_disables_thinking_and_parses_tool_call() -> None
     assert captured["payload"]["tool_choice"] == "auto"
     assert response.tool_calls[0].name == "run_sql"
     assert response.tool_calls[0].arguments["sql"] == "SELECT 1"
-    assert response.usage == {"prompt_tokens": 12, "completion_tokens": 7}
+    assert response.usage == {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}

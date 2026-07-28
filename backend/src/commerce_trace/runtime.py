@@ -5,8 +5,9 @@ from pathlib import Path
 
 from .agent import Agent
 from .agent.context import ContextAssembler
-from .agent.llm import LlmService, OpenAICompatibleLlm
+from .agent.llm import LLMService, OpenAICompatibleLLM
 from .agent.sql_safety import SqlSafetyPolicy
+from .agent.state import ToolBudget
 from .agent.tool import build_default_registry
 from .config import Settings
 from .persistence import SQLiteResources, SQLiteSqlExecutor, SQLiteStore
@@ -41,7 +42,7 @@ def _project_path(path: Path) -> Path:
 def build_runtime(
     settings: Settings,
     features: FeatureConfiguration | None = None,
-    llm: LlmService | None = None,
+    llm: LLMService | None = None,
 ) -> Runtime:
     """根据配置组装数据库、工具注册表和 Agent 运行时。"""
 
@@ -60,7 +61,7 @@ def build_runtime(
     if llm is None:
         if settings.deepseek_api_key is None:
             raise ValueError("COMMERCE_TRACE_DEEPSEEK_API_KEY is required")
-        llm = OpenAICompatibleLlm(
+        llm = OpenAICompatibleLLM(
             base_url=settings.deepseek_base_url,
             api_key=settings.deepseek_api_key.get_secret_value(),
             model=settings.deepseek_model,
@@ -73,9 +74,13 @@ def build_runtime(
         ),
         store=store,
         max_tool_iterations=settings.max_tool_iterations,
-        max_business_sql_calls=settings.max_business_sql_calls,
-        max_sql_retries_per_purpose=settings.max_sql_retries_per_purpose,
-        enable_sql_retries=features.enable_sql_retries,
+        tool_budgets={
+            "run_sql": ToolBudget(
+                max_calls=settings.max_business_sql_calls,
+                max_retries_per_purpose=settings.max_sql_retries_per_purpose,
+                retry_on_failure=features.enable_sql_retries,
+            ),
+        },
     )
     return Runtime(
         store=store,

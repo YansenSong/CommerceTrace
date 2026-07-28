@@ -29,12 +29,6 @@ class ToolRegistry:
             raise ValueError(f"duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
 
-    def tool_kind(self, name: str) -> str:
-        """返回已注册工具的类别，未找到时返回默认类别。"""
-
-        tool = self._tools.get(name)
-        return tool.kind if tool else "default"
-
     def schemas(self) -> list[ToolSchema]:
         """返回全部已注册工具的大模型可读 Schema。"""
 

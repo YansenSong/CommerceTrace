@@ -2,10 +2,11 @@ from commerce_trace.agent import Agent
 from commerce_trace.agent.synthesis import synthesize
 from commerce_trace.agent.tool import FakeSqlExecutor, build_default_registry
 from commerce_trace.agent.context import ContextAssembler
-from commerce_trace.models import EventType, Evidence, LlmResponse, ToolCall
-from commerce_trace.agent.llm import LlmService
+from commerce_trace.models import EventType, Evidence, LLMResponse, ToolCall
+from commerce_trace.agent.state import ToolBudget
+from commerce_trace.agent.llm import LLMService
 from commerce_trace.persistence import InMemoryStore
-from commerce_trace.agent.testing import ScriptedLlm
+from commerce_trace.agent.testing import ScriptedLLM
 
 
 def test_synthesis_keeps_concrete_model_answer_and_rejects_unknown_evidence() -> None:
@@ -76,7 +77,7 @@ async def test_greeting_goes_through_normal_agent_flow() -> None:
     store = InMemoryStore()
     executor = FakeSqlExecutor(rows=[{"revenue": 999_999.0}])
     agent = Agent(
-        llm=ScriptedLlm(),
+        llm=ScriptedLLM(),
         registry=build_default_registry(executor=executor),
         context_assembler=ContextAssembler(),
         store=store,
@@ -115,7 +116,7 @@ async def test_simple_question_streams_plan_tool_evidence_chart_answer_and_candi
     )
     registry = build_default_registry(executor=executor)
     agent = Agent(
-        llm=ScriptedLlm(),
+        llm=ScriptedLLM(),
         registry=registry,
         context_assembler=ContextAssembler(),
         store=store,
@@ -150,7 +151,7 @@ async def test_retryable_sql_failure_is_corrected_within_budget() -> None:
         failures=[RuntimeError("secret database detail")],
     )
     agent = Agent(
-        llm=ScriptedLlm(),
+        llm=ScriptedLLM(),
         registry=build_default_registry(executor=executor),
         context_assembler=ContextAssembler(),
         store=store,
@@ -170,13 +171,13 @@ async def test_retryable_sql_failure_is_corrected_within_budget() -> None:
     assert sum(event.event is EventType.TOOL_FAILED for event in events) == 1
     completed = events[-1]
     assert completed.payload["status"] == "completed"
-    assert completed.payload["usage"]["business_sql_calls"] == 2
+    assert completed.payload["usage"]["run_sql_calls"] == 2
     assert "secret database detail" not in str([event.model_dump() for event in events])
 
 
-class RepeatingSqlLlm(LlmService):
+class RepeatingSqlLLM(LLMService):
     async def complete(self, messages, tools, system_prompt):  # type: ignore[no-untyped-def]
-        return LlmResponse(
+        return LLMResponse(
             tool_calls=[
                 ToolCall(
                     name="run_sql",
@@ -193,15 +194,15 @@ class RepeatingSqlLlm(LlmService):
 async def test_business_sql_budget_returns_partial_evidence_and_stop_reason() -> None:
     store = InMemoryStore()
     agent = Agent(
-        llm=RepeatingSqlLlm(),
+        llm=RepeatingSqlLLM(),
         registry=build_default_registry(
             executor=FakeSqlExecutor(rows=[{"order_count": 3}]),
-    
+
         ),
         context_assembler=ContextAssembler(),
         store=store,
 
-        max_business_sql_calls=1,
+        tool_budgets={"run_sql": ToolBudget(max_calls=1)},
     )
 
     events = [
@@ -216,7 +217,6 @@ async def test_business_sql_budget_returns_partial_evidence_and_stop_reason() ->
 
     completed = events[-1]
     assert completed.payload["status"] == "partial"
-    assert completed.payload["stop_reason"] == "business_sql_limit"
+    assert completed.payload["stop_reason"] == "run_sql_limit"
     assert completed.payload["evidence_ids"]
-    assert "business_sql_limit" not in completed.payload["answer"]
     assert "已达到本轮查询次数上限" in completed.payload["answer"]

@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..models import Evidence, LlmMessage
+from ..models import Evidence, LLMMessage
 from .tool import ToolContext
 
 
@@ -43,6 +43,18 @@ _ALLOWED_TRANSITIONS: dict[RequestPhase, set[RequestPhase]] = {
 
 
 @dataclass
+class ToolBudget:
+    """通用工具预算——按工具名配置，Agent 不关心工具是 SQL 还是别的。"""
+
+    max_calls: int = 0
+    max_retries_per_purpose: int = 0
+    retry_on_failure: bool = True
+
+    def is_limited(self) -> bool:
+        return self.max_calls > 0
+
+
+@dataclass
 class RequestState:
     """集中维护单次 Agent 请求的阶段、预算、消息和证据。"""
 
@@ -51,17 +63,18 @@ class RequestState:
     request_id: str
     question: str
     phase: RequestPhase = RequestPhase.STARTED
-    messages: list[LlmMessage] = field(default_factory=list)
+    messages: list[LLMMessage] = field(default_factory=list)
     tool_context: ToolContext | None = None
     evidence: list[Evidence] = field(default_factory=list)
-    retry_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     incomplete_reason: str | None = None
     llm_content: str = ""
     tool_iterations: int = 0
-    sql_calls: int = 0
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # 通用工具统计
+    tool_call_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    tool_retries: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     def transition_to(self, target: RequestPhase) -> None:
         """校验状态迁移是否合法，并切换到目标阶段。"""
@@ -81,7 +94,7 @@ class RequestState:
         """进入执行阶段并初始化模型消息和工具上下文。"""
 
         self.transition_to(RequestPhase.EXECUTING)
-        self.messages = [LlmMessage(role="user", content=self.question)]
+        self.messages = [LLMMessage(role="user", content=self.question)]
         self.tool_context = ToolContext(
             user_id=self.user_id,
             conversation_id=self.conversation_id,
@@ -99,33 +112,35 @@ class RequestState:
         self,
         *,
         name: str,
-        kind: str,
         purpose: str,
         max_tool_iterations: int,
-        max_business_sql_calls: int,
-        max_sql_retries_per_purpose: int,
+        budgets: dict[str, ToolBudget],
     ) -> bool:
-        """在预算允许时登记一次工具调用，否则记录停止原因。"""
+        """按工具名匹配预算并登记一次工具调用，返回是否允许执行。"""
 
         if self.tool_iterations >= max_tool_iterations:
             self.incomplete_reason = "tool_iteration_limit"
             return False
-        if kind == "business_sql":
-            if self.sql_calls >= max_business_sql_calls:
-                self.incomplete_reason = "business_sql_limit"
+
+        budget = budgets.get(name)
+        if budget and budget.is_limited():
+            if self.tool_call_counts[name] >= budget.max_calls:
+                self.incomplete_reason = f"{name}_limit"
                 return False
-            if self.retry_counts[purpose] > max_sql_retries_per_purpose:
-                self.incomplete_reason = "sql_retry_limit"
+            if budget.max_retries_per_purpose > 0 and self.tool_retries[purpose] > budget.max_retries_per_purpose:
+                self.incomplete_reason = "retry_limit"
                 return False
-            self.sql_calls += 1
+
+        self.tool_call_counts[name] += 1
         self.tool_iterations += 1
         return True
 
-    def record_tool_failure(self, kind: str, purpose: str) -> None:
-        """记录指定用途的业务 SQL 工具失败次数。"""
+    def record_tool_failure(self, name: str, purpose: str, budgets: dict[str, ToolBudget]) -> None:
+        """对已配置预算的工具记录失败，供下次调用时判断重试上限。"""
 
-        if kind == "business_sql":
-            self.retry_counts[purpose] += 1
+        budget = budgets.get(name)
+        if budget and budget.retry_on_failure:
+            self.tool_retries[purpose] += 1
 
     def add_evidence(self, evidence: Evidence) -> None:
         """将新生成的证据加入本次请求。"""
@@ -150,12 +165,15 @@ class RequestState:
         self.transition_to(terminal_phase)
 
     def usage(self) -> dict[str, int]:
-        """汇总本次请求消耗的工具、SQL、模型和令牌预算。"""
+        """汇总本次请求消耗的工具、模型和令牌预算。"""
 
-        return {
+        base: dict[str, int] = {
             "tool_iterations": self.tool_iterations,
-            "business_sql_calls": self.sql_calls,
             "llm_calls": self.llm_calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
         }
+        for name, count in self.tool_call_counts.items():
+            base[f"{name}_calls"] = count
+        return base
+

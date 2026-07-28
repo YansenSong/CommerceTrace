@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any
-from uuid import uuid4
 
 import httpx
+from openai import AsyncOpenAI
 
-from ..models import LlmMessage, LlmResponse, ToolCall, ToolSchema
+from ..models import LLMMessage, LLMResponse, ToolSchema
+from .utils import wrap_message, wrap_tool_schema, unwrap_tool_calls, unwrap_usage
 
+# ── 代理 ───
 
 def _http_proxy_from_environment() -> str | None:
     """读取首个格式有效的 HTTP 代理环境变量。"""
@@ -28,23 +29,26 @@ def _http_proxy_from_environment() -> str | None:
     return None
 
 
-class LlmService(ABC):
+# ── 服务抽象与实现 ───────────────────────────────────────────────────────────
+
+
+class LLMService(ABC):
     """定义 Agent 所依赖的大模型补全服务接口。"""
 
     @abstractmethod
     async def complete(
         self,
-        messages: list[LlmMessage],
+        messages: list[LLMMessage],
         tools: list[ToolSchema],
         system_prompt: str,
-    ) -> LlmResponse:
+    ) -> LLMResponse:
         """根据消息、工具定义和系统提示生成一次模型响应。"""
 
         raise NotImplementedError
 
 
-class OpenAICompatibleLlm(LlmService):
-    """通过 OpenAI 兼容的聊天补全接口访问大模型。"""
+class OpenAICompatibleLLM(LLMService):
+    """通过 OpenAI SDK 访问兼容的聊天补全接口。"""
 
     def __init__(
         self,
@@ -57,89 +61,45 @@ class OpenAICompatibleLlm(LlmService):
     ) -> None:
         """保存接口地址、鉴权、模型和网络请求配置。"""
 
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
         self.model = model
-        self.timeout = timeout
-        self.transport = transport
+
+        client_kwargs: dict[str, Any] = {"timeout": timeout}
+        if transport is not None:
+            client_kwargs["transport"] = transport
+        else:
+            proxy = _http_proxy_from_environment()
+            if proxy:
+                client_kwargs["proxy"] = proxy
+            client_kwargs["trust_env"] = False
+
+        http_client = httpx.AsyncClient(**client_kwargs)
+        self._client = AsyncOpenAI(
+            base_url=base_url.rstrip("/"),
+            api_key=api_key,
+            http_client=http_client,
+        )
 
     async def complete(
         self,
-        messages: list[LlmMessage],
+        messages: list[LLMMessage],
         tools: list[ToolSchema],
         system_prompt: str,
-    ) -> LlmResponse:
+    ) -> LLMResponse:
         """发送聊天补全请求并解析文本、工具调用及令牌用量。"""
 
-        payload_messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-        for message in messages:
-            item: dict[str, Any] = {"role": message.role, "content": message.content}
-            if message.tool_call_id:
-                item["tool_call_id"] = message.tool_call_id
-            if message.tool_calls:
-                item["tool_calls"] = [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {
-                            "name": call.name,
-                            "arguments": json.dumps(call.arguments, ensure_ascii=False),
-                        },
-                    }
-                    for call in message.tool_calls
-                ]
-            payload_messages.append(item)
-        payload = {
-            "model": self.model,
-            "messages": payload_messages,
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.parameters,
-                    },
-                }
-                for tool in tools
-            ],
-            "tool_choice": "auto",
-            "temperature": 0,
-            "thinking": {"type": "disabled"},
-        }
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        proxy = None if self.transport is not None else _http_proxy_from_environment()
-        async with httpx.AsyncClient(
-            timeout=self.timeout,
-            transport=self.transport,
-            proxy=proxy,
-            trust_env=False,
-        ) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            response.raise_for_status()
-        body = response.json()
-        choice = body["choices"][0]["message"]
-        calls: list[ToolCall] = []
-        for raw in choice.get("tool_calls") or []:
-            function = raw["function"]
-            calls.append(
-                ToolCall(
-                    id=raw.get("id") or str(uuid4()),
-                    name=function["name"],
-                    arguments=json.loads(function.get("arguments") or "{}"),
-                )
-            )
-        usage = {
-            key: int(value)
-            for key, value in (body.get("usage") or {}).items()
-            if isinstance(value, int)
-        }
-        return LlmResponse(
-            content=choice.get("content"),
-            tool_calls=calls,
-            usage=usage,
+        response = await self._client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": system_prompt}]
+            + [wrap_message(m) for m in messages],
+            tools=[wrap_tool_schema(t) for t in tools] or None,
+            tool_choice="auto" if tools else None,
+            temperature=0,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+
+        choice = response.choices[0]
+        return LLMResponse(
+            content=choice.message.content,
+            tool_calls=unwrap_tool_calls(choice.message.tool_calls or []),
+            usage=unwrap_usage(response.usage),
         )

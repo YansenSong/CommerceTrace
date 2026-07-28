@@ -20,12 +20,6 @@ class RunSqlTool(Tool[RunSqlArgs]):
         self._policy = policy or SqlSafetyPolicy()
 
     @property
-    def kind(self) -> str:
-        """将此工具标记为需要独立预算控制的业务 SQL 工具。"""
-
-        return "business_sql"
-
-    @property
     def name(self) -> str:
         """返回工具注册名称。"""
 

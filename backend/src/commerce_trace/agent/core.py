@@ -7,14 +7,14 @@ from typing import Any
 from .context import ContextAssembler
 from ..models import (
     EventType,
-    LlmMessage,
+    LLMMessage,
     StreamEvent,
     ToolFailure,
     ToolSuccess,
 )
-from .llm import LlmService
+from .llm import LLMService
 from ..persistence import ConversationLedger
-from .state import RequestPhase, RequestState
+from .state import RequestPhase, RequestState, ToolBudget
 from .synthesis import synthesize
 from .tool import ToolRegistry
 from .prompt import SYSTEM_PROMPT
@@ -26,25 +26,21 @@ class Agent:
     def __init__(
         self,
         *,
-        llm: LlmService,
+        llm: LLMService,
         registry: ToolRegistry,
         context_assembler: ContextAssembler,
         store: ConversationLedger,
         max_tool_iterations: int = 10,
-        max_business_sql_calls: int = 5,
-        max_sql_retries_per_purpose: int = 2,
-        enable_sql_retries: bool = True,
+        tool_budgets: dict[str, ToolBudget] | None = None,
     ) -> None:
-        """注入 Agent 依赖，并设置工具调用与 SQL 重试预算。"""
+        """注入 Agent 依赖，工具预算按名称映射（未配置的工具无额外限制）。"""
 
         self.llm = llm
         self.registry = registry
         self.context_assembler = context_assembler
         self.store = store
         self.max_tool_iterations = max_tool_iterations
-        self.max_business_sql_calls = max_business_sql_calls
-        self.max_sql_retries_per_purpose = max_sql_retries_per_purpose
-        self.enable_sql_retries = enable_sql_retries
+        self.tool_budgets = tool_budgets or {}
 
     async def _make_event(
         self,
@@ -155,7 +151,7 @@ class Agent:
                 state.llm_content = response.content or ""
                 break
             state.messages.append(
-                LlmMessage(
+                LLMMessage(
                     role="assistant",
                     content=response.content or "",
                     tool_calls=response.tool_calls,
@@ -163,14 +159,11 @@ class Agent:
             )
             for call in response.tool_calls:
                 purpose = str(call.arguments.get("purpose", "未声明目的"))
-                tool_kind = self.registry.tool_kind(call.name)
                 if not state.begin_tool(
                     name=call.name,
-                    kind=tool_kind,
                     purpose=purpose,
                     max_tool_iterations=self.max_tool_iterations,
-                    max_business_sql_calls=self.max_business_sql_calls,
-                    max_sql_retries_per_purpose=self.max_sql_retries_per_purpose,
+                    budgets=self.tool_budgets,
                 ):
                     break
                 safe_arguments = self._safe_arguments(call.name, call.arguments)
@@ -197,7 +190,7 @@ class Agent:
                 state.tool_context.tool_call_id = call.id
                 result = await self.registry.execute(call.name, call.arguments, state.tool_context)
                 if isinstance(result, ToolFailure):
-                    state.record_tool_failure(tool_kind, purpose)
+                    state.record_tool_failure(call.name, purpose, self.tool_budgets)
                     await self.store.save_tool_result(
                         user_id,
                         call.id,
@@ -216,7 +209,7 @@ class Agent:
                         },
                     )
                     state.messages.append(
-                        LlmMessage(
+                        LLMMessage(
                             role="tool",
                             tool_call_id=call.id,
                             content=json.dumps(
@@ -229,8 +222,9 @@ class Agent:
                             ),
                         )
                     )
-                    if tool_kind == "business_sql" and not self.enable_sql_retries:
-                        state.incomplete_reason = "sql_retry_disabled"
+                    budget = self.tool_budgets.get(call.name)
+                    if budget and not budget.retry_on_failure:
+                        state.incomplete_reason = f"{call.name}_retry_disabled"
                         break
                     continue
 
@@ -274,7 +268,7 @@ class Agent:
                     )
                 state.tool_context.created_charts.clear()
                 state.messages.append(
-                    LlmMessage(
+                    LLMMessage(
                         role="tool",
                         tool_call_id=call.id,
                         content=json.dumps(

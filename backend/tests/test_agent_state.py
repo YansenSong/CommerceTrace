@@ -1,6 +1,6 @@
 import pytest
 
-from commerce_trace.agent.state import RequestPhase, RequestState
+from commerce_trace.agent.state import RequestPhase, RequestState, ToolBudget
 from commerce_trace.models import Evidence
 
 
@@ -35,13 +35,14 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
     state.mark_context_ready()
     state.prepare_execution()
 
+    budgets = {
+        "run_sql": ToolBudget(max_calls=1, max_retries_per_purpose=2),
+    }
     assert state.begin_tool(
         name="run_sql",
-        kind="business_sql",
         purpose="按地区统计销售额",
         max_tool_iterations=3,
-        max_business_sql_calls=1,
-        max_sql_retries_per_purpose=2,
+        budgets=budgets,
     )
     state.add_evidence(
         Evidence(
@@ -58,13 +59,11 @@ def test_request_state_owns_budget_and_evidence_progress() -> None:
 
     assert not state.begin_tool(
         name="run_sql",
-        kind="business_sql",
         purpose="补充地区统计",
         max_tool_iterations=3,
-        max_business_sql_calls=1,
-        max_sql_retries_per_purpose=2,
+        budgets=budgets,
     )
-    assert state.incomplete_reason == "business_sql_limit"
+    assert state.incomplete_reason == "run_sql_limit"
     assert state.tool_iterations == 1
-    assert state.sql_calls == 1
+    assert state.tool_call_counts["run_sql"] == 1
     assert [item.evidence_id for item in state.evidence] == ["ev_regions"]

@@ -146,7 +146,7 @@ UV_CACHE_DIR=/tmp/commerce-trace-uv-cache \
 uv run pytest -p pytest_asyncio.plugin tests ../data_generator/test_generate.py
 ```
 
-普通测试注入确定性的 `ScriptedLlm` 测试替身；它不会进入应用运行时。SQLite 集成测试会在 pytest 临时目录中创建一次性数据库，不需要网络、数据库服务或真实模型密钥。真实模型或真实 Embedding 测试分别标记为 `model`、`embedding`。
+普通测试注入确定性的 `ScriptedLLM` 测试替身；它不会进入应用运行时。SQLite 集成测试会在 pytest 临时目录中创建一次性数据库，不需要网络、数据库服务或真实模型密钥。真实模型或真实 Embedding 测试分别标记为 `model`、`embedding`。
 
 ## 评测、记忆回放与实验
 

@@ -93,7 +93,7 @@ class ToolFailure(BaseModel):
 ToolResult = ToolSuccess | ToolFailure
 
 
-class LlmMessage(BaseModel):
+class LLMMessage(BaseModel):
     """表示发送给大模型的一条对话或工具消息。"""
 
     role: Literal["system", "user", "assistant", "tool"]
@@ -102,7 +102,7 @@ class LlmMessage(BaseModel):
     tool_call_id: str | None = None
 
 
-class LlmResponse(BaseModel):
+class LLMResponse(BaseModel):
     """表示大模型返回的文本、工具调用和用量信息。"""
 
     content: str | None = None

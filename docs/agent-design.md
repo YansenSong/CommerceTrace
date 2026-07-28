@@ -106,7 +106,7 @@ class Agent:
     def __init__(
         self,
         *,
-        llm: LlmService,                    # LLM 服务
+        llm: LLMService,                    # LLM 服务
         registry: ToolRegistry,             # 工具注册表
         context_assembler: ContextAssembler, # 上下文装配器
         store: ConversationLedger,          # 对话账本（持久化）
@@ -242,7 +242,7 @@ class RequestState:
     phase: RequestPhase = STARTED
     context: AgentContext | None          # 装配的上下文
     plan: list[PlanStep]                  # 执行计划
-    messages: list[LlmMessage]            # LLM 对话消息
+    messages: list[LLMMessage]            # LLM 对话消息
     tool_context: ToolExecutionContext    # 工具执行上下文
     evidence: list[Evidence]              # 积累的证据
     charts: list[Chart]                   # 生成的图表
@@ -904,20 +904,20 @@ class Store(ConversationLedger, MemoryRepository, Protocol):
 ### 10.1 抽象层
 
 ```python
-class LlmService(ABC):
+class LLMService(ABC):
     async def complete(
         self,
-        messages: list[LlmMessage],
+        messages: list[LLMMessage],
         tools: list[ToolSchema],
         system_prompt: str,
-    ) -> LlmResponse:
+    ) -> LLMResponse:
 ```
 
 实现：
-- **OpenAICompatibleLlm**：生产实现，对接 DeepSeek API
-- **ScriptedLlm**：测试实现，确定性工具调用序列，不依赖外部 API
+- **OpenAICompatibleLLM**：生产实现，对接 DeepSeek API
+- **ScriptedLLM**：测试实现，确定性工具调用序列，不依赖外部 API
 
-### 10.2 OpenAICompatibleLlm
+### 10.2 OpenAICompatibleLLM
 
 ```
 POST {base_url}/chat/completions
@@ -931,11 +931,11 @@ POST {base_url}/chat/completions
 特点：
 - 支持 HTTP 代理（自动读取 `HTTPS_PROXY` 等环境变量）
 - 60 秒超时
-- 响应自动解析为 `LlmResponse`（含 tool_calls + usage）
+- 响应自动解析为 `LLMResponse`（含 tool_calls + usage）
 
-### 10.3 ScriptedLlm（测试双）
+### 10.3 ScriptedLLM（测试双）
 
-`ScriptedLlm` 是根据问题关键词的**确定性状态机**，不发出任何网络请求：
+`ScriptedLLM` 是根据问题关键词的**确定性状态机**，不发出任何网络请求：
 
 - 检测归因关键词（为什么/原因/驱动）→ 按序返回 3 步 SQL 调用
 - 检测地区/退款关键词 → 返回对应 SQL
@@ -986,7 +986,7 @@ def create_app(*, settings, store, agent, resources) -> FastAPI:
 
 支持多种运行模式：
 - **生产模式**：`build_runtime()` → SQLite + DeepSeek
-- **测试模式**：`InMemoryStore + ScriptedLlm`
+- **测试模式**：`InMemoryStore + ScriptedLLM`
 - **自定义注入**：依赖全部可替换
 
 ---
@@ -1008,7 +1008,7 @@ def build_runtime(settings, features=None, llm=None) -> Runtime:
 4. MemoryService(store, fingerprint, ...)    # 记忆服务
 5. SQLiteSqlExecutor(database_path)          # SQL 执行器
 6. SqlSafetyPolicy(max_rows, ...)            # 安全策略
-7. OpenAICompatibleLlm(base_url, key, model) # LLM
+7. OpenAICompatibleLLM(base_url, key, model) # LLM
 8. build_default_registry(executor, memory, policy)  # 注册 3 个工具
 9. ContextAssembler(memory, knowledge, ...)   # 上下文装配
 10. Agent(llm, registry, context, store, memory)     # 核心 Agent

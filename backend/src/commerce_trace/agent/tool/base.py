@@ -39,12 +39,6 @@ class Tool(ABC, Generic[ArgsT]):
     """
 
     @property
-    def kind(self) -> str:
-        """返回用于预算统计的工具类别，子类可按需覆盖。"""
-
-        return "default"
-
-    @property
     @abstractmethod
     def name(self) -> str:
         """返回工具在注册表中的唯一名称。"""

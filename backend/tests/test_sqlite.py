@@ -12,7 +12,7 @@ from commerce_trace.persistence import (
     SQLiteStore,
 )
 from commerce_trace.runtime import build_runtime
-from commerce_trace.agent.testing import ScriptedLlm
+from commerce_trace.agent.testing import ScriptedLLM
 
 
 def test_init_parser_supports_if_empty() -> None:
@@ -60,7 +60,7 @@ async def test_sqlite_runtime_persists_real_evidence_and_replay(tmp_path: Path) 
     settings = Settings(database_path=tmp_path / "commerce_trace.db")
     migrate(settings)
     generate_data(settings, "test")
-    runtime = build_runtime(settings, llm=ScriptedLlm())
+    runtime = build_runtime(settings, llm=ScriptedLLM())
     for resource in runtime.resources:
         await resource.open()
     try:
