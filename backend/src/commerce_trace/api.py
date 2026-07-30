@@ -3,12 +3,17 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from fastapi import Cookie, FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from langchain_deepseek import ChatDeepSeek
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from .agent import Agent
 from .config import Config
 from .models import (
     ChatResponse,
@@ -18,9 +23,10 @@ from .models import (
     MessageCreate,
     MessageHistory,
 )
-from .runtime import Runtime, build_runtime
+from .persistence import ConversationStore
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class ApiError(Exception):
@@ -35,8 +41,38 @@ def create_app(settings: Config | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async with build_runtime(settings) as runtime:
-            app.state.runtime = runtime
+        resolved = settings.model_copy(
+            update={
+                "database_path": _project_path(settings.database_path),
+                "agent_state_path": _project_path(settings.agent_state_path),
+            }
+        )
+        resolved.agent_state_path.parent.mkdir(parents=True, exist_ok=True)
+        store = ConversationStore(resolved.agent_state_path)
+        await store.setup()
+        async with AsyncSqliteSaver.from_conn_string(
+            str(resolved.agent_state_path)
+        ) as checkpointer:
+            await checkpointer.setup()
+            if resolved.deepseek_api_key is None:
+                raise ValueError("COMMERCE_TRACE_DEEPSEEK_API_KEY is required")
+            model = ChatDeepSeek(
+                model=resolved.deepseek_model,
+                api_key=resolved.deepseek_api_key,
+                base_url=resolved.deepseek_base_url,
+                temperature=0,
+                timeout=resolved.model_timeout_seconds,
+                max_retries=1,
+                streaming=False,
+            )
+            app.state.settings = resolved
+            app.state.store = store
+            app.state.agent = Agent(
+                config=resolved,
+                model=model,
+                checkpointer=checkpointer,
+            )
+            app.state.checkpointer = checkpointer
             yield
 
     app = FastAPI(
@@ -66,11 +102,11 @@ def create_app(settings: Config | None = None) -> FastAPI:
         status_code=201,
     )
     async def create_conversation(request: Request, response: Response) -> ConversationCreate:
-        runtime = _runtime(request)
-        user_id, is_new = _user_id(request, runtime.settings)
-        conversation = await runtime.store.create(user_id)
+        resolved = _settings(request)
+        user_id, is_new = _user_id(request, resolved)
+        conversation = await _store(request).create(user_id)
         if is_new:
-            _set_user_cookie(response, runtime.settings, user_id)
+            _set_user_cookie(response, resolved, user_id)
         return conversation
 
     @app.get("/api/conversations", response_model=ConversationList)
@@ -82,7 +118,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
     ) -> ConversationList:
         if user_id is None:
             return ConversationList(items=[], limit=limit, offset=offset)
-        items = await _runtime(request).store.list_conversations(
+        items = await _store(request).list_conversations(
             user_id,
             limit=limit,
             offset=offset,
@@ -100,7 +136,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
     ) -> MessageHistory:
         if user_id is None:
             raise _not_found()
-        messages = await _runtime(request).store.messages(user_id, conversation_id)
+        messages = await _store(request).messages(user_id, conversation_id)
         if messages is None:
             raise _not_found()
         return MessageHistory(conversation_id=conversation_id, messages=messages)
@@ -117,17 +153,17 @@ def create_app(settings: Config | None = None) -> FastAPI:
     ) -> ChatResponse:
         if user_id is None:
             raise _not_found()
-        runtime = _runtime(request)
-        if not await runtime.store.owns(user_id, conversation_id):
+        store = _store(request)
+        if not await store.owns(user_id, conversation_id):
             raise _not_found()
-        thread_id = runtime.thread_id(user_id, conversation_id)
-        await runtime.store.add_message(
+        thread_id = f"{user_id}:{conversation_id}"
+        await store.add_message(
             conversation_id,
             role="user",
             content=body.message,
         )
         try:
-            result = await runtime.agent.invoke(
+            result = await _agent(request).invoke(
                 conversation_id=conversation_id,
                 thread_id=thread_id,
                 message=body.message,
@@ -135,7 +171,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
         except Exception as exc:
             logger.exception("Agent request failed for conversation %s", conversation_id)
             raise ApiError(502, "agent_failed", "Agent 暂时无法完成分析") from exc
-        await runtime.store.add_message(
+        await store.add_message(
             conversation_id,
             role="assistant",
             content=result.answer,
@@ -153,20 +189,32 @@ def create_app(settings: Config | None = None) -> FastAPI:
     ) -> Response:
         if user_id is None:
             raise _not_found()
-        runtime = _runtime(request)
-        if not await runtime.store.owns(user_id, conversation_id):
+        store = _store(request)
+        if not await store.owns(user_id, conversation_id):
             raise _not_found()
-        thread_id = runtime.thread_id(user_id, conversation_id)
-        await runtime.checkpointer.adelete_thread(thread_id)
-        if not await runtime.store.delete(user_id, conversation_id):
+        thread_id = f"{user_id}:{conversation_id}"
+        await request.app.state.checkpointer.adelete_thread(thread_id)
+        if not await store.delete(user_id, conversation_id):
             raise _not_found()
         return Response(status_code=204)
 
     return app
 
 
-def _runtime(request: Request) -> Runtime:
-    return request.app.state.runtime  # type: ignore[no-any-return]
+def _project_path(path: Path) -> Path:
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _settings(request: Request) -> Config:
+    return cast(Config, request.app.state.settings)
+
+
+def _store(request: Request) -> ConversationStore:
+    return cast(ConversationStore, request.app.state.store)
+
+
+def _agent(request: Request) -> Agent:
+    return cast(Agent, request.app.state.agent)
 
 
 def _user_id(request: Request, settings: Config) -> tuple[str, bool]:

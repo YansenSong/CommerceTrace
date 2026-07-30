@@ -24,7 +24,7 @@ from .tools import (
 )
 
 
-class AgentService:
+class Agent:
     def __init__(
         self,
         *,
@@ -64,12 +64,14 @@ class AgentService:
         thread_id: str,
         message: str,
     ) -> ChatResponse:
+        
         artifacts = RunArtifacts()
         usage_callback = UsageMetadataCallbackHandler()
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id},
             "callbacks": [usage_callback],
         }
+
         result = await self._agent.ainvoke(
             {"messages": [{"role": "user", "content": message}]},
             config=config,
@@ -80,6 +82,7 @@ class AgentService:
                 sql_policy=self._sql_policy,
             ),
         )
+        
         answer = _last_answer(result.get("messages", []))
         usage = _usage(usage_callback.usage_metadata)
         return ChatResponse(
