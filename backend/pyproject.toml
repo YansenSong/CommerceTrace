@@ -7,14 +7,16 @@ name = "commerce-trace"
 version = "0.1.0"
 description = "Evidence-backed Chinese ecommerce data agent"
 readme = "../README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
-  "httpx>=0.27",
-  "openai>=2.49.0",
+  "langchain==1.3.14",
+  "langchain-deepseek==1.1.0",
+  "langgraph==1.2.10",
+  "langgraph-checkpoint-sqlite==3.1.0",
   "pydantic>=2.10",
   "pydantic-settings>=2.7",
-  "PyYAML>=6.0",
+  "pyyaml==6.0.3",
   "sqlglot>=26.0",
   "uvicorn[standard]>=0.34",
 ]
@@ -24,16 +26,12 @@ data = [
   "Faker>=33.0",
   "numpy>=2.0",
 ]
-memory = [
-  "chromadb>=1.0",
-  "onnxruntime==1.23.2; python_version < '3.11'",
-  "sentence-transformers>=3.4",
-]
-test = [
+
+[dependency-groups]
+dev = [
   "mypy>=1.15",
-  "pytest>=8.3",
-  "pytest-asyncio>=0.25",
   "ruff>=0.9",
+  "types-pyyaml==6.0.12.20260724",
 ]
 
 [project.scripts]
@@ -42,25 +40,15 @@ commerce-trace = "commerce_trace.operations.cli:main_sync"
 [tool.hatch.build.targets.wheel]
 packages = ["src/commerce_trace"]
 
-[tool.pytest.ini_options]
-addopts = "-q"
-asyncio_mode = "auto"
-markers = [
-  "integration: exercises the local SQLite persistence boundary",
-  "model: requires a real OpenAI-compatible model",
-  "embedding: requires the configured embedding model",
-]
-testpaths = ["tests"]
-
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
 packages = ["commerce_trace"]
 warn_unused_ignores = false

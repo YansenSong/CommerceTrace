@@ -30,7 +30,7 @@
   --radius-md: 12px;
   --radius-lg: 18px;
   --sidebar-width: 268px;
-  --trace-width: 300px;
+  --trace-width: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -242,6 +242,12 @@ nav {
   overflow-y: auto;
 }
 
+.history-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .history-item {
   position: relative;
   display: grid;
@@ -256,6 +262,33 @@ nav {
   background: transparent;
   text-align: left;
   transition: background 180ms ease-out, color 180ms ease-out;
+}
+
+.history-delete {
+  position: absolute;
+  right: 5px;
+  display: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+
+.history-row:hover .history-delete,
+.history-delete:focus-visible {
+  display: grid;
+}
+
+.history-delete:hover {
+  background: #f3e8e5;
+  color: #9f3f32;
+}
+
+.history-row:hover .history-item time {
+  visibility: hidden;
 }
 
 .history-item:hover { background: rgba(255, 255, 255, .65); }
@@ -400,7 +433,7 @@ main {
 .workspace {
   display: grid;
   min-height: 0;
-  grid-template-columns: minmax(0, 1fr) var(--trace-width);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .conversation {
@@ -1236,7 +1269,7 @@ tbody tr:hover td { background: #f7f9f7; }
 .composer-area form,
 .composer-hint {
   width: min(100%, 790px);
-  margin-right: calc(var(--trace-width) / 2);
+  margin-right: auto;
   margin-left: auto;
 }
 

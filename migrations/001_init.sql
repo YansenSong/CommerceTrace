@@ -1,6 +1,6 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS ecommerce.customers (
+CREATE TABLE IF NOT EXISTS customers (
     customer_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     region TEXT NOT NULL,
@@ -8,12 +8,12 @@ CREATE TABLE IF NOT EXISTS ecommerce.customers (
     acquisition_channel TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.categories (
+CREATE TABLE IF NOT EXISTS categories (
     category_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.products (
+CREATE TABLE IF NOT EXISTS products (
     product_id INTEGER PRIMARY KEY,
     category_id INTEGER NOT NULL REFERENCES categories(category_id),
     name TEXT NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS ecommerce.products (
     current_cost REAL NOT NULL CHECK (current_cost >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.orders (
+CREATE TABLE IF NOT EXISTS orders (
     order_id INTEGER PRIMARY KEY,
     customer_id INTEGER NOT NULL REFERENCES customers(customer_id),
     ordered_at TEXT NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS ecommerce.orders (
     total_amount REAL NOT NULL CHECK (total_amount >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.order_items (
+CREATE TABLE IF NOT EXISTS order_items (
     order_item_id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
     product_id INTEGER NOT NULL REFERENCES products(product_id),
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS ecommerce.order_items (
     unit_cost REAL NOT NULL CHECK (unit_cost >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.payments (
+CREATE TABLE IF NOT EXISTS payments (
     payment_id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL UNIQUE REFERENCES orders(order_id) ON DELETE CASCADE,
     paid_at TEXT NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS ecommerce.payments (
     amount REAL NOT NULL CHECK (amount >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.refunds (
+CREATE TABLE IF NOT EXISTS refunds (
     refund_id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
     refunded_at TEXT NOT NULL,
@@ -55,19 +55,14 @@ CREATE TABLE IF NOT EXISTS ecommerce.refunds (
     amount REAL NOT NULL CHECK (amount >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS ecommerce.inventory_snapshots (
+CREATE TABLE IF NOT EXISTS inventory_snapshots (
     snapshot_date TEXT NOT NULL,
     product_id INTEGER NOT NULL REFERENCES products(product_id),
     stock_quantity INTEGER NOT NULL CHECK (stock_quantity >= 0),
     PRIMARY KEY (snapshot_date, product_id)
 );
 
-CREATE TABLE IF NOT EXISTS agent_app.anonymous_users (
-    user_id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.dataset_metadata (
+CREATE TABLE IF NOT EXISTS dataset_metadata (
     singleton INTEGER PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
     data_version TEXT NOT NULL,
     seed INTEGER NOT NULL,
@@ -75,79 +70,5 @@ CREATE TABLE IF NOT EXISTS agent_app.dataset_metadata (
     result_hash TEXT NOT NULL,
     row_counts TEXT NOT NULL,
     generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.conversations (
-    conversation_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES anonymous_users(user_id),
-    title TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS agent_app.conversations_user_updated_idx
-    ON conversations (user_id, updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS agent_app.messages (
-    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.stream_events (
-    event_id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    request_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_app.stream_events_conversation_idx
-    ON stream_events (conversation_id, created_at, event_id);
-
-CREATE TABLE IF NOT EXISTS agent_app.tool_calls (
-    tool_call_id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    request_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.tool_results (
-    tool_result_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tool_call_id TEXT NOT NULL REFERENCES tool_calls(tool_call_id) ON DELETE CASCADE,
-    success INTEGER NOT NULL,
-    result_summary TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.evidence (
-    evidence_id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    request_id TEXT NOT NULL,
-    analysis_step TEXT NOT NULL,
-    tool_call_id TEXT NOT NULL,
-    claim TEXT NOT NULL,
-    sql TEXT NOT NULL,
-    columns_json TEXT NOT NULL,
-    row_count INTEGER NOT NULL,
-    result_hash TEXT NOT NULL,
-    execution_time_ms REAL NOT NULL DEFAULT 0,
-    preview_json TEXT NOT NULL,
-    executed_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS agent_app.charts (
-    chart_id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    request_id TEXT NOT NULL,
-    evidence_id TEXT NOT NULL REFERENCES evidence(evidence_id) ON DELETE CASCADE,
-    chart_type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    figure_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

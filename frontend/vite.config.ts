@@ -9,8 +9,4 @@ export default defineConfig({
       '/health': 'http://localhost:8000',
     },
   },
-  test: {
-    environment: 'node',
-    globals: true,
-  },
 })

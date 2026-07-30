@@ -1,63 +1,37 @@
-export type EventName =
-  | 'conversation.started'
-  | 'context.assembled'
-  | 'tool.started'
-  | 'tool.completed'
-  | 'tool.failed'
-  | 'evidence.created'
-  | 'chart.created'
-  | 'answer.delta'
-  | 'answer.completed'
-  | 'request.failed'
-
-export interface StreamEvent {
-  event_id: string
-  event: EventName
-  conversation_id: string
-  request_id: string
-  timestamp: string
-  payload: Record<string, unknown>
-}
-
-export interface Message {
-  id: string
-  requestId: string
-  role: 'user' | 'assistant'
-  content: string
-}
-
-export interface ToolState {
-  toolCallId: string
-  name: string
-  status: 'running' | 'completed' | 'failed'
-  data?: Record<string, unknown>
-  error?: string
-}
-
-export interface Evidence {
-  requestId: string
-  evidence_id: string
-  analysis_step: string
-  claim: string
+export interface QueryTrace {
+  query_id: string
+  purpose: string
   sql: string
   columns: string[]
   row_count: number
-  result_hash: string
-  execution_time_ms: number
-  executed_at: string
   preview: Array<Record<string, unknown>>
+  execution_time_ms: number
 }
 
 export interface Chart {
-  requestId: string
   chart_id: string
-  evidence_id: string
+  source_query_id: string
   chart_type: 'metric_card' | 'bar' | 'line' | 'pie'
   title: string
   figure: {
     data?: Plotly.Data[]
     layout?: Partial<Plotly.Layout>
   }
+}
+
+export interface Usage {
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface Message {
+  message_id: number | string
+  role: 'user' | 'assistant'
+  content: string
+  queries: QueryTrace[]
+  charts: Chart[]
+  usage: Usage
+  created_at: string
 }
 
 export interface ConversationSummary {
@@ -67,14 +41,29 @@ export interface ConversationSummary {
   updated_at: string
 }
 
+export interface ConversationCreate extends ConversationSummary {}
+
+export interface MessageHistory {
+  conversation_id: string
+  messages: Message[]
+}
+
+export interface ChatResponse {
+  conversation_id: string
+  answer: string
+  queries: QueryTrace[]
+  charts: Chart[]
+  usage: Usage
+}
+
+export interface ApiError {
+  code: string
+  message: string
+}
+
 export interface ChatState {
   conversationId?: string
-  requestId?: string
   messages: Message[]
-  tools: ToolState[]
-  evidence: Evidence[]
-  charts: Chart[]
-  seenEventIds: Set<string>
-  status: 'idle' | 'working' | 'completed' | 'partial' | 'error'
+  status: 'idle' | 'working' | 'completed' | 'error'
   statusMessage: string
 }

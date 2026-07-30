@@ -4,14 +4,24 @@ import {
   ReactNode,
   Suspense,
   useEffect,
-  useReducer,
   useRef,
   useState,
 } from 'react'
 
-import { listConversations, replayConversation, streamQuestion } from './api'
-import { chatReducer, initialState, replayEvents } from './reducer'
-import type { Chart, ConversationSummary, Evidence } from './types'
+import {
+  createConversation,
+  deleteConversation,
+  getConversationMessages,
+  listConversations,
+  sendMessage,
+} from './api'
+import type {
+  Chart,
+  ChatState,
+  ConversationSummary,
+  Message,
+  QueryTrace,
+} from './types'
 import './styles.css'
 
 const ChartView = lazy(async () => {
@@ -422,7 +432,7 @@ function EvidenceSection({
   evidence,
   headingId,
 }: {
-  evidence: Evidence[]
+  evidence: QueryTrace[]
   headingId: string
 }) {
   if (!evidence.length) return null
@@ -442,11 +452,11 @@ function EvidenceSection({
 
       <div className="evidence-list">
         {evidence.map((item) => (
-          <details className="evidence-card" key={item.evidence_id}>
+          <details className="evidence-card" key={item.query_id}>
             <summary>
               <div className="evidence-summary">
-                <code>{item.evidence_id}</code>
-                <strong>{item.claim}</strong>
+                <code>{item.query_id}</code>
+                <strong>{item.purpose}</strong>
                 <span>
                   {item.row_count} 行
                   <i />
@@ -465,8 +475,8 @@ function EvidenceSection({
                 <pre><code>{item.sql}</code></pre>
               </details>
               <div className="evidence-meta">
-                <span>结果哈希 {item.result_hash.slice(0, 12)}</span>
-                <span>执行于 {new Date(item.executed_at).toLocaleString('zh-CN')}</span>
+                <span>{item.columns.length} 个字段</span>
+                <span>仅保存前 20 行预览</span>
               </div>
             </div>
           </details>
@@ -481,7 +491,7 @@ function ChartCard({ chart }: { chart: Chart }) {
     <section className="chart-card">
       <div className="chart-heading">
         <span><Icon name="chart" size={18} /></span>
-        <div><h2>{chart.title}</h2><p>数据来源 {chart.evidence_id}</p></div>
+        <div><h2>{chart.title}</h2><p>数据来源 {chart.source_query_id}</p></div>
       </div>
       <ChartView chart={chart} />
     </section>
@@ -503,13 +513,18 @@ const suggestions = [
   '最近三个月销售趋势如何？',
 ]
 
+const emptyState: ChatState = {
+  messages: [],
+  status: 'idle',
+  statusMessage: '准备就绪',
+}
+
 export default function App() {
-  const [state, dispatch] = useReducer(chatReducer, initialState)
+  const [state, setState] = useState<ChatState>(emptyState)
   const [question, setQuestion] = useState('')
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [traceOpen, setTraceOpen] = useState(false)
   const conversationEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -530,59 +545,117 @@ export default function App() {
       behavior: state.status === 'working' ? 'smooth' : 'auto',
       block: 'end',
     })
-  }, [state.messages, state.evidence, state.status])
+  }, [state.messages, state.status])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const value = question.trim()
     if (!value || state.status === 'working') return
     setQuestion('')
-    dispatch({
-      event_id: crypto.randomUUID(),
-      event: 'conversation.started',
-      conversation_id: state.conversationId ?? '',
-      request_id: '',
-      timestamp: new Date().toISOString(),
-      payload: { question: value },
-    })
+    let conversationId = state.conversationId
     try {
-      for await (const item of streamQuestion(value, state.conversationId)) {
-        dispatch(item)
+      if (!conversationId) {
+        const conversation = await createConversation()
+        conversationId = conversation.conversation_id
       }
+      const userMessage: Message = {
+        message_id: `pending-${crypto.randomUUID()}`,
+        role: 'user',
+        content: value,
+        queries: [],
+        charts: [],
+        usage: { input_tokens: 0, output_tokens: 0 },
+        created_at: new Date().toISOString(),
+      }
+      setState((current) => ({
+        ...current,
+        conversationId,
+        messages: [...current.messages, userMessage],
+        status: 'working',
+        statusMessage: '正在分析问题',
+      }))
+      const result = await sendMessage(conversationId, value)
+      const assistantMessage: Message = {
+        message_id: `assistant-${crypto.randomUUID()}`,
+        role: 'assistant',
+        content: result.answer,
+        queries: result.queries,
+        charts: result.charts,
+        usage: result.usage,
+        created_at: new Date().toISOString(),
+      }
+      setState((current) => ({
+        ...current,
+        conversationId,
+        messages: [...current.messages, assistantMessage],
+        status: 'completed',
+        statusMessage: '分析完成',
+      }))
       await refreshHistory()
     } catch (error) {
-      dispatch({
-        event_id: crypto.randomUUID(),
-        event: 'request.failed',
-        conversation_id: state.conversationId ?? '',
-        request_id: '',
-        timestamp: new Date().toISOString(),
-        payload: {
-          message: error instanceof Error ? error.message : '连接失败',
-        },
-      })
+      setState((current) => ({
+        ...current,
+        conversationId,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '连接失败',
+      }))
     }
   }
 
-  const startNewChat = () => {
-    dispatch({
-      type: 'hydrate',
-      state: { ...initialState, seenEventIds: new Set<string>() },
-    })
-    setQuestion('')
-    setSidebarOpen(false)
-    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  const startNewChat = async () => {
+    try {
+      const conversation = await createConversation()
+      setState({
+        ...emptyState,
+        conversationId: conversation.conversation_id,
+      })
+      setQuestion('')
+      setSidebarOpen(false)
+      await refreshHistory()
+      window.setTimeout(() => textareaRef.current?.focus(), 0)
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '新建会话失败',
+      }))
+    }
   }
 
   const openConversation = async (conversationId: string) => {
     setLoadingHistory(true)
     try {
-      const replay = await replayConversation(conversationId)
-      const replayed = replayEvents(replay.events)
-      dispatch({ type: 'hydrate', state: replayed })
+      const history = await getConversationMessages(conversationId)
+      setState({
+        conversationId,
+        messages: history.messages,
+        status: 'idle',
+        statusMessage: '会话已加载',
+      })
       setSidebarOpen(false)
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '加载会话失败',
+      }))
     } finally {
       setLoadingHistory(false)
+    }
+  }
+
+  const removeConversation = async (conversationId: string) => {
+    if (!window.confirm('永久删除这个会话？此操作无法撤销。')) return
+    try {
+      await deleteConversation(conversationId)
+      if (state.conversationId === conversationId) setState(emptyState)
+      await refreshHistory()
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '删除会话失败',
+      }))
     }
   }
 
@@ -622,7 +695,7 @@ export default function App() {
           </button>
         </div>
 
-        <button className="new-chat" onClick={startNewChat}>
+        <button className="new-chat" onClick={() => void startNewChat()}>
           <Icon name="plus" size={18} />
           <span>新建分析</span>
           <kbd>⌘ K</kbd>
@@ -640,20 +713,29 @@ export default function App() {
             </div>
           )}
           {conversations.map((conversation) => (
-            <button
-              key={conversation.conversation_id}
-              aria-current={
-                state.conversationId === conversation.conversation_id ? 'page' : undefined
-              }
-              className="history-item"
-              disabled={loadingHistory}
-              onClick={() => void openConversation(conversation.conversation_id)}
-            >
-              <span>{conversation.title}</span>
-              <time dateTime={conversation.updated_at}>
-                {formatHistoryDate(conversation.updated_at)}
-              </time>
-            </button>
+            <div className="history-row" key={conversation.conversation_id}>
+              <button
+                aria-current={
+                  state.conversationId === conversation.conversation_id ? 'page' : undefined
+                }
+                className="history-item"
+                disabled={loadingHistory}
+                onClick={() => void openConversation(conversation.conversation_id)}
+              >
+                <span>{conversation.title}</span>
+                <time dateTime={conversation.updated_at}>
+                  {formatHistoryDate(conversation.updated_at)}
+                </time>
+              </button>
+              <button
+                aria-label={`删除会话：${conversation.title}`}
+                className="history-delete"
+                disabled={loadingHistory}
+                onClick={() => void removeConversation(conversation.conversation_id)}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
           ))}
         </nav>
 
@@ -683,14 +765,6 @@ export default function App() {
               <span className="status-dot" />
               <span>{state.statusMessage}</span>
             </div>
-            <button
-              aria-label="查看分析轨迹"
-              aria-expanded={traceOpen}
-              className="icon-button trace-button"
-              onClick={() => setTraceOpen(true)}
-            >
-              <Icon name="trace" />
-            </button>
           </div>
         </header>
 
@@ -721,17 +795,13 @@ export default function App() {
             <div className="message-list">
               {state.messages.map((message) => {
                 const replyEvidence =
-                  message.role === 'assistant'
-                    ? state.evidence.filter((item) => item.requestId === message.requestId)
-                    : []
+                  message.role === 'assistant' ? message.queries : []
                 const replyCharts =
-                  message.role === 'assistant'
-                    ? state.charts.filter((item) => item.requestId === message.requestId)
-                    : []
-                const headingId = `evidence-${message.id}`
+                  message.role === 'assistant' ? message.charts : []
+                const headingId = `evidence-${message.message_id}`
 
                 return (
-                  <article key={message.id} className={`message ${message.role}`}>
+                  <article key={message.message_id} className={`message ${message.role}`}>
                     <div className="message-identity">
                       <span className="avatar" aria-hidden="true">
                         {message.role === 'user' ? '你' : '商'}
@@ -775,56 +845,6 @@ export default function App() {
 
             <div ref={conversationEndRef} />
           </div>
-
-          <button
-            aria-label="关闭分析轨迹"
-            className={`drawer-scrim trace-scrim ${traceOpen ? 'is-visible' : ''}`}
-            onClick={() => setTraceOpen(false)}
-          />
-          <aside className={`trace-panel ${traceOpen ? 'is-open' : ''}`} aria-label="分析轨迹">
-            <div className="trace-heading">
-              <div>
-                <span className="section-icon"><Icon name="trace" size={18} /></span>
-                <div><h2>分析轨迹</h2><p>实时查看 Agent 的执行过程</p></div>
-              </div>
-              <button
-                aria-label="关闭分析轨迹"
-                className="icon-button trace-close"
-                onClick={() => setTraceOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            {state.tools.length === 0 && state.evidence.length === 0 ? (
-              <div className="trace-empty">
-                <span><Icon name="trace" size={22} /></span>
-                <h3>等待分析任务</h3>
-                <p>提交问题后，这里会展示工具调用与执行进度。</p>
-              </div>
-            ) : null}
-
-            {state.tools.length > 0 && (
-              <section className="tool-section">
-                <div className="trace-subheading">
-                  <span>工具调用</span>
-                  <span>{state.tools.length}</span>
-                </div>
-                <div className="tools">
-                  {state.tools.map((tool) => (
-                    <details key={tool.toolCallId} className={`tool ${tool.status}`}>
-                      <summary>
-                        <span className="tool-icon"><Icon name="database" size={15} /></span>
-                        <span>{tool.name}</span>
-                        <b>{tool.status === 'running' ? '运行中' : tool.status === 'completed' ? '完成' : '失败'}</b>
-                      </summary>
-                      {tool.error && <p>{tool.error}</p>}
-                    </details>
-                  ))}
-                </div>
-              </section>
-            )}
-          </aside>
         </section>
 
         <div className="composer-area">

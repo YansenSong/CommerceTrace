@@ -5,7 +5,7 @@ import json
 import random
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -79,7 +79,7 @@ def generate(config: dict[str, Any]) -> GeneratedData:
                 customer_id,
                 fake.name(),
                 rng.choice(REGIONS),
-                datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=rng.randrange(540)),
+                datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=rng.randrange(540)),
                 channel,
             )
         )
@@ -114,7 +114,7 @@ def generate(config: dict[str, Any]) -> GeneratedData:
             customer_id = rng.randint(1, customer_count)
         customer_order_counts[customer_id] += 1
         customer = customers[customer_id - 1]
-        ordered_at = datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(
+        ordered_at = datetime(2025, 1, 1, tzinfo=UTC) + timedelta(
             days=rng.randrange(273), seconds=rng.randrange(86_400)
         )
         if ordered_at.month == 7 and customer[2] == "华东" and rng.random() > 0.55:
@@ -123,7 +123,7 @@ def generate(config: dict[str, Any]) -> GeneratedData:
         selected_products = rng.sample(
             range(1, product_count + 1), k=min(item_count, product_count)
         )
-        total = Decimal("0")
+        total = Decimal(0)
         contains_digital = False
         contains_appliance = False
         pending_items: list[tuple[Any, ...]] = []

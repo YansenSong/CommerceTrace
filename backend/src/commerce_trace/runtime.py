@@ -1,89 +1,71 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .agent import Agent
-from .agent.context import ContextAssembler
-from .agent.llm import LLMService, OpenAICompatibleLLM
-from .agent.sql_safety import SqlSafetyPolicy
-from .agent.state import ToolBudget
-from .agent.tool import build_default_registry
-from .config import Settings
-from .persistence import SQLiteResources, SQLiteSqlExecutor, SQLiteStore
+from langchain_deepseek import ChatDeepSeek
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-
-@dataclass
-class Runtime:
-    """保存一次应用运行所需的存储、Agent 和外部资源。"""
-
-    store: SQLiteStore
-    agent: Agent
-    resources: list[SQLiteResources]
-
-
-@dataclass(frozen=True)
-class FeatureConfiguration:
-    """控制知识注入和 SQL 重试等可消融功能。"""
-
-    include_knowledge: bool = True
-    enable_sql_retries: bool = True
-
+from .agent import AgentService
+from .config import Config
+from .persistence import BusinessDatabase, ConversationStore
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _project_path(path: Path) -> Path:
-    """将相对路径解析为相对于项目根目录的绝对路径。"""
-
+def project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def build_runtime(
-    settings: Settings,
-    features: FeatureConfiguration | None = None,
-    llm: LLMService | None = None,
-) -> Runtime:
-    """根据配置组装数据库、工具注册表和 Agent 运行时。"""
+@dataclass
+class Runtime:
+    settings: Config
+    store: ConversationStore
+    business: BusinessDatabase
+    agent: AgentService
+    checkpointer: AsyncSqliteSaver
 
-    features = features or FeatureConfiguration()
-    database_path = _project_path(settings.database_path)
-    resources = SQLiteResources(database_path)
-    store = SQLiteStore(resources)
-    executor = SQLiteSqlExecutor(
-        database_path,
-        statement_timeout_ms=settings.statement_timeout_ms,
+    @staticmethod
+    def thread_id(user_id: str, conversation_id: str) -> str:
+        return f"{user_id}:{conversation_id}"
+
+
+@asynccontextmanager
+async def build_runtime(settings: Config) -> AsyncIterator[Runtime]:
+    resolved = settings.model_copy(
+        update={
+            "database_path": project_path(settings.database_path),
+            "agent_state_path": project_path(settings.agent_state_path),
+        }
     )
-    policy = SqlSafetyPolicy(
-        max_rows=settings.max_result_rows,
-        max_distinct_values=settings.max_distinct_values,
-    )
-    if llm is None:
-        if settings.deepseek_api_key is None:
+    resolved.agent_state_path.parent.mkdir(parents=True, exist_ok=True)
+    store = ConversationStore(resolved.agent_state_path)
+    await store.setup()
+    async with AsyncSqliteSaver.from_conn_string(
+        str(resolved.agent_state_path)
+    ) as checkpointer:
+        await checkpointer.setup()
+        if resolved.deepseek_api_key is None:
             raise ValueError("COMMERCE_TRACE_DEEPSEEK_API_KEY is required")
-        llm = OpenAICompatibleLLM(
-            base_url=settings.deepseek_base_url,
-            api_key=settings.deepseek_api_key.get_secret_value(),
-            model=settings.deepseek_model,
+        model = ChatDeepSeek(
+            model=resolved.deepseek_model,
+            api_key=resolved.deepseek_api_key,
+            base_url=resolved.deepseek_base_url,
+            temperature=0,
+            timeout=resolved.model_timeout_seconds,
+            max_retries=1,
+            streaming=False,
         )
-    agent = Agent(
-        llm=llm,
-        registry=build_default_registry(executor=executor, policy=policy),
-        context_assembler=ContextAssembler(
-            include_knowledge=features.include_knowledge,
-        ),
-        store=store,
-        max_tool_iterations=settings.max_tool_iterations,
-        tool_budgets={
-            "run_sql": ToolBudget(
-                max_calls=settings.max_business_sql_calls,
-                max_retries_per_purpose=settings.max_sql_retries_per_purpose,
-                retry_on_failure=features.enable_sql_retries,
+        yield Runtime(
+            settings=resolved,
+            store=store,
+            business=BusinessDatabase(resolved.database_path),
+            agent=AgentService(
+                config=resolved,
+                model=model,
+                checkpointer=checkpointer,
             ),
-        },
-    )
-    return Runtime(
-        store=store,
-        agent=agent,
-        resources=[resources],
-    )
+            checkpointer=checkpointer,
+        )

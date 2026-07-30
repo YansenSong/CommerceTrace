@@ -4,6 +4,6 @@ Only ``Agent`` is public. Request state and answer synthesis remain internal to
 the Agent Core module.
 """
 
-from .core import Agent
+from .service import AgentService, ConversationBusyError
 
-__all__ = ["Agent"]
+__all__ = ["AgentService", "ConversationBusyError"]
