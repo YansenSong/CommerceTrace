@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 from uuid import uuid4
 
 from fastapi import Cookie, FastAPI, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .agent import ConversationBusyError
 from .config import Config
 from .models import (
     ChatResponse,
@@ -62,24 +59,6 @@ def create_app(settings: Config | None = None) -> FastAPI:
             status_code=exc.status_code,
             content=exc.body.model_dump(mode="json"),
         )
-
-    @app.get("/health")
-    async def health(request: Request) -> dict[str, Any]:
-        runtime = _runtime(request)
-        business_ready, state_ready = await asyncio.gather(
-            runtime.business.health(),
-            runtime.store.health(),
-        )
-        dependencies = {
-            "business_database": "ready" if business_ready else "unavailable",
-            "agent_state": "ready" if state_ready else "unavailable",
-            "agent": "ready",
-        }
-        ready = business_ready and state_ready
-        return {
-            "status": "ready" if ready else "degraded",
-            "dependencies": dependencies,
-        }
 
     @app.post(
         "/api/conversations",
@@ -142,8 +121,6 @@ def create_app(settings: Config | None = None) -> FastAPI:
         if not await runtime.store.owns(user_id, conversation_id):
             raise _not_found()
         thread_id = runtime.thread_id(user_id, conversation_id)
-        if await runtime.agent.is_busy(thread_id):
-            raise ApiError(409, "conversation_busy", "该会话正在处理另一条消息")
         await runtime.store.add_message(
             conversation_id,
             role="user",
@@ -155,10 +132,6 @@ def create_app(settings: Config | None = None) -> FastAPI:
                 thread_id=thread_id,
                 message=body.message,
             )
-        except ConversationBusyError as exc:
-            raise ApiError(409, "conversation_busy", "该会话正在处理另一条消息") from exc
-        except TimeoutError as exc:
-            raise ApiError(504, "agent_timeout", "分析超时，请稍后重试") from exc
         except Exception as exc:
             logger.exception("Agent request failed for conversation %s", conversation_id)
             raise ApiError(502, "agent_failed", "Agent 暂时无法完成分析") from exc
@@ -184,8 +157,6 @@ def create_app(settings: Config | None = None) -> FastAPI:
         if not await runtime.store.owns(user_id, conversation_id):
             raise _not_found()
         thread_id = runtime.thread_id(user_id, conversation_id)
-        if await runtime.agent.is_busy(thread_id):
-            raise ApiError(409, "conversation_busy", "会话执行期间不能删除")
         await runtime.checkpointer.adelete_thread(thread_id)
         if not await runtime.store.delete(user_id, conversation_id):
             raise _not_found()

@@ -10,7 +10,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .agent import AgentService
 from .config import Config
-from .persistence import BusinessDatabase, ConversationStore
+from .persistence import ConversationStore
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -23,7 +23,6 @@ def project_path(path: Path) -> Path:
 class Runtime:
     settings: Config
     store: ConversationStore
-    business: BusinessDatabase
     agent: AgentService
     checkpointer: AsyncSqliteSaver
 
@@ -61,7 +60,6 @@ async def build_runtime(settings: Config) -> AsyncIterator[Runtime]:
         yield Runtime(
             settings=resolved,
             store=store,
-            business=BusinessDatabase(resolved.database_path),
             agent=AgentService(
                 config=resolved,
                 model=model,

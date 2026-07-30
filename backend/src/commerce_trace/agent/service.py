@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    ModelCallLimitMiddleware,
-    SummarizationMiddleware,
-    ToolCallLimitMiddleware,
-)
+from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
@@ -18,7 +13,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ..config import Config
 from ..models import ChatResponse, Usage
-from ..persistence import SQLiteSqlExecutor
 from .prompt import SYSTEM_PROMPT
 from .sql_safety import SqlSafetyPolicy
 from .tools import (
@@ -30,10 +24,6 @@ from .tools import (
 )
 
 
-class ConversationBusyError(RuntimeError):
-    pass
-
-
 class AgentService:
     def __init__(
         self,
@@ -42,25 +32,14 @@ class AgentService:
         model: BaseChatModel,
         checkpointer: BaseCheckpointSaver[Any],
     ) -> None:
-        self._executor = SQLiteSqlExecutor(
-            config.database_path,
-            statement_timeout_ms=config.statement_timeout_ms,
-        )
+        self._database_path = config.database_path.resolve()
+        self._statement_timeout_ms = config.statement_timeout_ms
         self._sql_policy = SqlSafetyPolicy(
             max_rows=config.max_result_rows,
             max_distinct_values=config.max_distinct_values,
         )
 
         middleware: list[Any] = [
-            ToolCallLimitMiddleware(
-                tool_name="run_sql",
-                run_limit=config.max_business_sql_calls,
-                exit_behavior="continue",
-            ),
-            ModelCallLimitMiddleware(
-                run_limit=config.max_agent_steps,
-                exit_behavior="end",
-            ),
             SummarizationMiddleware(
                 model,
                 trigger=("messages", 30),
@@ -77,16 +56,6 @@ class AgentService:
             checkpointer=checkpointer,
             name="commerce_trace",
         )
-        self._request_timeout = config.request_timeout_seconds
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._locks_guard = asyncio.Lock()
-
-    async def _lock_for(self, thread_id: str) -> asyncio.Lock:
-        async with self._locks_guard:
-            return self._locks.setdefault(thread_id, asyncio.Lock())
-
-    async def is_busy(self, thread_id: str) -> bool:
-        return (await self._lock_for(thread_id)).locked()
 
     async def invoke(
         self,
@@ -95,36 +64,31 @@ class AgentService:
         thread_id: str,
         message: str,
     ) -> ChatResponse:
-        lock = await self._lock_for(thread_id)
-        if lock.locked():
-            raise ConversationBusyError(thread_id)
-        async with lock:
-            artifacts = RunArtifacts()
-            usage_callback = UsageMetadataCallbackHandler()
-            config: RunnableConfig = {
-                "configurable": {"thread_id": thread_id},
-                "callbacks": [usage_callback],
-                "recursion_limit": 30,
-            }
-            async with asyncio.timeout(self._request_timeout):
-                result = await self._agent.ainvoke(
-                    {"messages": [{"role": "user", "content": message}]},
-                    config=config,
-                    context=AgentContext(
-                        artifacts=artifacts,
-                        executor=self._executor,
-                        sql_policy=self._sql_policy,
-                    ),
-                )
-            answer = _last_answer(result.get("messages", []))
-            usage = _usage(usage_callback.usage_metadata)
-            return ChatResponse(
-                conversation_id=conversation_id,
-                answer=answer,
-                queries=artifacts.queries,
-                charts=artifacts.charts,
-                usage=usage,
-            )
+        artifacts = RunArtifacts()
+        usage_callback = UsageMetadataCallbackHandler()
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id},
+            "callbacks": [usage_callback],
+        }
+        result = await self._agent.ainvoke(
+            {"messages": [{"role": "user", "content": message}]},
+            config=config,
+            context=AgentContext(
+                artifacts=artifacts,
+                database_path=self._database_path,
+                statement_timeout_ms=self._statement_timeout_ms,
+                sql_policy=self._sql_policy,
+            ),
+        )
+        answer = _last_answer(result.get("messages", []))
+        usage = _usage(usage_callback.usage_metadata)
+        return ChatResponse(
+            conversation_id=conversation_id,
+            answer=answer,
+            queries=artifacts.queries,
+            charts=artifacts.charts,
+            usage=usage,
+        )
 
 
 def _last_answer(messages: list[Any]) -> str:

@@ -26,11 +26,10 @@ FastAPI
 - Node.js 20+
 - DeepSeek API key
 
-## 安装与初始化
+## 安装
 
 ```bash
 npm run sync
-npm run init
 ```
 
 在 `backend/.env` 中配置：
@@ -43,6 +42,9 @@ COMMERCE_TRACE_AGENT_STATE_PATH=data/agent_state.db
 ```
 
 依赖由 `backend/uv.lock` 和 `frontend/package-lock.json` 锁定。当前 LangChain 核心依赖使用确切版本，不使用预览版。
+
+后端直接读取 `COMMERCE_TRACE_DATABASE_PATH` 指向的现有业务数据库；
+项目不提供数据库初始化命令。
 
 ## 运行
 
@@ -64,7 +66,6 @@ npm run frontend
 | `GET` | `/api/conversations/{id}/messages` | 获取历史消息与查询/图表快照 |
 | `POST` | `/api/conversations/{id}/messages` | 发送消息并获得最终 JSON 回答 |
 | `DELETE` | `/api/conversations/{id}` | 永久删除会话和 checkpoints |
-| `GET` | `/health` | 检查业务库、状态库和 Agent |
 
 发送消息：
 
@@ -89,7 +90,7 @@ npm run frontend
 }
 ```
 
-浏览器通过 `HttpOnly` 匿名 cookie 隔离会话。不同会话可并行；同一会话同时发送第二条消息会返回 `409 conversation_busy`。单次请求总超时 120 秒。
+浏览器通过 `HttpOnly` 匿名 cookie 隔离会话。
 
 ## 数据与安全
 
@@ -117,6 +118,5 @@ npm run build
 3. 连续追问，确认 Agent 能引用同一会话的上下文。
 4. 请求数据分析与图表，确认回答、查询预览和 Plotly 图表可见。
 5. 刷新页面并打开历史会话，确认最终消息、查询和图表恢复。
-6. 同时向同一会话发送请求，确认第二个请求收到 `409`。
-7. 永久删除会话，确认列表、历史消息和 Agent checkpoint 均不可恢复。
-8. 尝试写入 SQL 或访问非白名单表，确认工具拒绝执行。
+6. 永久删除会话，确认列表、历史消息和 Agent checkpoint 均不可恢复。
+7. 尝试写入 SQL 或访问非白名单表，确认工具拒绝执行。

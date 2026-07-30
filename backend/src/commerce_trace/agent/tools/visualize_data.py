@@ -25,46 +25,44 @@ async def visualize_data(
     """把本次请求的 SQL 查询结果转换为受控 Plotly figure。"""
 
     artifacts = runtime.context.artifacts
-    async with artifacts.semaphore:
-        rows = artifacts.rows_by_query.get(query_id)
-        if rows is None:
-            return {
-                "success": False,
-                "error": "query_not_found",
-                "message": "图表只能引用本次请求已完成的查询",
-            }
-        columns = set(rows[0]) if rows else set()
-        requested = {item for item in (x, y, value) if item}
-        if not requested.issubset(columns):
-            return {
-                "success": False,
-                "error": "chart_field_not_found",
-                "message": "图表字段不存在于查询结果",
-            }
-        figure = _figure(
-            rows=rows,
-            chart_type=chart_type,
-            title=title,
-            x=x,
-            y=y,
-            value=value,
-        )
-        if figure is None:
-            return {
-                "success": False,
-                "error": "chart_field_required",
-                "message": "图表缺少必要的分类或数值字段",
-            }
-        chart = Chart(
-            chart_id=f"chart_{uuid4().hex[:12]}",
-            source_query_id=query_id,
-            chart_type=chart_type,
-            title=title,
-            figure=figure,
-        )
-        async with artifacts.lock:
-            artifacts.charts.append(chart)
-        return {"success": True, "chart": chart.model_dump(mode="json")}
+    rows = artifacts.rows_by_query.get(query_id)
+    if rows is None:
+        return {
+            "success": False,
+            "error": "query_not_found",
+            "message": "图表只能引用本次请求已完成的查询",
+        }
+    columns = set(rows[0]) if rows else set()
+    requested = {item for item in (x, y, value) if item}
+    if not requested.issubset(columns):
+        return {
+            "success": False,
+            "error": "chart_field_not_found",
+            "message": "图表字段不存在于查询结果",
+        }
+    figure = _figure(
+        rows=rows,
+        chart_type=chart_type,
+        title=title,
+        x=x,
+        y=y,
+        value=value,
+    )
+    if figure is None:
+        return {
+            "success": False,
+            "error": "chart_field_required",
+            "message": "图表缺少必要的分类或数值字段",
+        }
+    chart = Chart(
+        chart_id=f"chart_{uuid4().hex[:12]}",
+        source_query_id=query_id,
+        chart_type=chart_type,
+        title=title,
+        figure=figure,
+    )
+    artifacts.charts.append(chart)
+    return {"success": True, "chart": chart.model_dump(mode="json")}
 
 
 def _figure(

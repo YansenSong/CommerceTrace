@@ -3,7 +3,6 @@
   "private": true,
   "scripts": {
     "sync": "cd backend && uv sync --extra data && cd ../frontend && npm install",
-    "init": "uv run --project backend commerce-trace init --profile test --if-empty",
     "backend": "uv run --project backend uvicorn commerce_trace.api:app --reload --port 8000",
     "frontend": "cd frontend && npm run dev",
     "dev": "npm run backend & npm run frontend",

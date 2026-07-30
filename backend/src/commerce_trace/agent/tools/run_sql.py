@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
+from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
 
@@ -10,6 +12,40 @@ from langchain.tools import ToolRuntime, tool
 from ...models import QueryTrace
 from ..sql_safety import SqlSafetyError
 from .context import AgentContext
+
+
+async def _execute_sql(
+    database_path: Path,
+    sql: str,
+    row_limit: int,
+    statement_timeout_ms: int,
+) -> list[dict[str, Any]]:
+    def operation() -> list[dict[str, Any]]:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            "ATTACH DATABASE ? AS ecommerce",
+            (str(database_path),),
+        )
+        connection.execute("PRAGMA query_only = ON")
+        deadline = time.monotonic() + statement_timeout_ms / 1_000
+        connection.set_progress_handler(
+            lambda: 1 if time.monotonic() > deadline else 0,
+            1_000,
+        )
+        try:
+            if sql.upper().startswith("EXPLAIN "):
+                cursor = connection.execute(sql)
+            else:
+                cursor = connection.execute(
+                    f"SELECT * FROM ({sql}) AS commerce_trace_result LIMIT ?",
+                    (row_limit,),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            connection.close()
+
+    return await asyncio.to_thread(operation)
 
 
 @tool
@@ -33,11 +69,12 @@ async def run_sql(
 
     started = time.perf_counter()
     try:
-        async with artifacts.semaphore:
-            rows = await context.executor.execute(
-                validated.normalized_sql,
-                validated.row_limit,
-            )
+        rows = await _execute_sql(
+            context.database_path,
+            validated.normalized_sql,
+            validated.row_limit,
+            context.statement_timeout_ms,
+        )
     except sqlite3.Error:
         return {
             "success": False,
@@ -56,9 +93,8 @@ async def run_sql(
         preview=rows[:20],
         execution_time_ms=(time.perf_counter() - started) * 1_000,
     )
-    async with artifacts.lock:
-        artifacts.queries.append(trace)
-        artifacts.rows_by_query[query_id] = rows
+    artifacts.queries.append(trace)
+    artifacts.rows_by_query[query_id] = rows
     return {
         "success": True,
         "query_id": query_id,

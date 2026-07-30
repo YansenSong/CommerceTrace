@@ -61,14 +61,6 @@ class ConversationStore:
             )
             await connection.commit()
 
-    async def health(self) -> bool:
-        try:
-            async with aiosqlite.connect(self.path) as connection:
-                await connection.execute("SELECT 1")
-            return True
-        except aiosqlite.Error:
-            return False
-
     async def create(self, user_id: str) -> ConversationCreate:
         conversation_id = f"conv_{uuid4().hex}"
         now = utc_now()

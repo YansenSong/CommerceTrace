@@ -24,7 +24,6 @@ FastAPI + LangChain 1.x + LangGraph SQLite checkpoint 的中文电商分析 Agen
 - `GET /api/conversations/{id}/messages`
 - `POST /api/conversations/{id}/messages`
 - `DELETE /api/conversations/{id}`
-- `GET /health`
 
 项目不包含自动化测试。提交前至少运行 `npm run lint`、`npm run typecheck`
 和 `npm run build`，并按照 README 的手工验收清单检查核心流程。
