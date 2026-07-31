@@ -36,42 +36,46 @@ class ApiError(Exception):
         self.body = ErrorBody(code=code, message=message)
 
 
-def create_app(settings: Config | None = None) -> FastAPI:
-    settings = settings or Config()
+def create_app(config: Config | None = None) -> FastAPI:
+    config = config or Config()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        resolved = settings.model_copy(
+        configs = config.model_copy(
             update={
-                "database_path": _project_path(settings.database_path),
-                "agent_state_path": _project_path(settings.agent_state_path),
+                "database_path": _project_path(config.database_path),
+                "agent_state_path": _project_path(config.agent_state_path),
             }
         )
-        resolved.agent_state_path.parent.mkdir(parents=True, exist_ok=True)
-        store = ConversationStore(resolved.agent_state_path)
+        configs.agent_state_path.parent.mkdir(parents=True, exist_ok=True)
+        store = ConversationStore(configs.agent_state_path)
         await store.setup()
         async with AsyncSqliteSaver.from_conn_string(
-            str(resolved.agent_state_path)
+            str(configs.agent_state_path)
         ) as checkpointer:
             await checkpointer.setup()
-            if resolved.deepseek_api_key is None:
-                raise ValueError("COMMERCE_TRACE_DEEPSEEK_API_KEY is required")
+            if configs.model_api_key is None:
+                raise ValueError("COMMERCE_TRACE_MODEL_API_KEY is required")
+            
             model = ChatDeepSeek(
-                model=resolved.deepseek_model,
-                api_key=resolved.deepseek_api_key,
-                base_url=resolved.deepseek_base_url,
+                model=configs.model,
+                api_key=configs.model_api_key,
+                base_url=configs.model_base_url,
                 temperature=0,
-                timeout=resolved.model_timeout_seconds,
+                timeout=configs.model_timeout_seconds,
                 max_retries=1,
                 streaming=False,
             )
-            app.state.settings = resolved
+
+            app.state.config = configs
             app.state.store = store
+
             app.state.agent = Agent(
-                config=resolved,
+                config=configs,
                 model=model,
                 checkpointer=checkpointer,
             )
+
             app.state.checkpointer = checkpointer
             yield
 
@@ -102,17 +106,17 @@ def create_app(settings: Config | None = None) -> FastAPI:
         status_code=201,
     )
     async def create_conversation(request: Request, response: Response) -> ConversationCreate:
-        resolved = _settings(request)
-        user_id, is_new = _user_id(request, resolved)
+        configs = _config(request)
+        user_id, is_new = _user_id(request, configs)
         conversation = await _store(request).create(user_id)
         if is_new:
-            _set_user_cookie(response, resolved, user_id)
+            _set_user_cookie(response, configs, user_id)
         return conversation
 
     @app.get("/api/conversations", response_model=ConversationList)
     async def list_conversations(
         request: Request,
-        user_id: str | None = Cookie(default=None, alias=settings.cookie_name),
+        user_id: str | None = Cookie(default=None, alias=config.cookie_name),
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> ConversationList:
@@ -132,7 +136,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
     async def conversation_messages(
         conversation_id: str,
         request: Request,
-        user_id: str | None = Cookie(default=None, alias=settings.cookie_name),
+        user_id: str | None = Cookie(default=None, alias=config.cookie_name),
     ) -> MessageHistory:
         if user_id is None:
             raise _not_found()
@@ -149,7 +153,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
         conversation_id: str,
         body: MessageCreate,
         request: Request,
-        user_id: str | None = Cookie(default=None, alias=settings.cookie_name),
+        user_id: str | None = Cookie(default=None, alias=config.cookie_name),
     ) -> ChatResponse:
         if user_id is None:
             raise _not_found()
@@ -185,7 +189,7 @@ def create_app(settings: Config | None = None) -> FastAPI:
     async def delete_conversation(
         conversation_id: str,
         request: Request,
-        user_id: str | None = Cookie(default=None, alias=settings.cookie_name),
+        user_id: str | None = Cookie(default=None, alias=config.cookie_name),
     ) -> Response:
         if user_id is None:
             raise _not_found()
@@ -205,8 +209,8 @@ def _project_path(path: Path) -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
-def _settings(request: Request) -> Config:
-    return cast(Config, request.app.state.settings)
+def _config(request: Request) -> Config:
+    return cast(Config, request.app.state.config)
 
 
 def _store(request: Request) -> ConversationStore:
@@ -217,17 +221,17 @@ def _agent(request: Request) -> Agent:
     return cast(Agent, request.app.state.agent)
 
 
-def _user_id(request: Request, settings: Config) -> tuple[str, bool]:
-    current = request.cookies.get(settings.cookie_name)
+def _user_id(request: Request, config: Config) -> tuple[str, bool]:
+    current = request.cookies.get(config.cookie_name)
     return (current, False) if current else (f"anon_{uuid4().hex}", True)
 
 
-def _set_user_cookie(response: Response, settings: Config, user_id: str) -> None:
+def _set_user_cookie(response: Response, config: Config, user_id: str) -> None:
     response.set_cookie(
-        settings.cookie_name,
+        config.cookie_name,
         user_id,
         httponly=True,
-        secure=settings.cookie_secure,
+        secure=config.cookie_secure,
         samesite="lax",
         max_age=60 * 60 * 24 * 365,
     )

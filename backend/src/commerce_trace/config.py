@@ -17,9 +17,9 @@ class Config(BaseSettings):
 
     database_path: Path = Path("data/commerce_trace.db")
     agent_state_path: Path = Path("data/agent_state.db")
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_api_key: SecretStr | None = None
-    deepseek_model: str = "deepseek-chat"
+    model_base_url: str = "https://api.deepseek.com"
+    model_api_key: SecretStr | None = None
+    model: str = "deepseek-chat"
     cookie_name: str = "commerce_trace_user"
     cookie_secure: bool = False
     statement_timeout_ms: int = 5_000
