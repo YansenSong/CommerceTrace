@@ -11,7 +11,7 @@ class Config(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="COMMERCE_TRACE_",
-        env_file=".env",
+        env_file=Path(__file__).resolve().parents[3] / ".env",
         extra="ignore",
     )
 

@@ -23,7 +23,6 @@ dependencies = [
 [project.optional-dependencies]
 data = [
   "Faker>=33.0",
-  "numpy>=2.0",
   "pyyaml==6.0.3",
 ]
 
@@ -31,7 +30,11 @@ data = [
 dev = [
   "mypy>=1.15",
   "ruff>=0.9",
+  "types-pyyaml==6.0.12.20260724",
 ]
+
+[project.scripts]
+commerce-trace = "commerce_trace.operations.cli:main_sync"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/commerce_trace"]
