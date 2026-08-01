@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from langchain.tools import ToolRuntime, tool
 
-from ..prompt import SCHEMA_CATALOG
+from ..prompt import SCHEMA_CATALOG, compact_catalog
 from .context import AgentContext
 
 
@@ -12,15 +12,20 @@ from .context import AgentContext
 async def get_schema(
     tables: Annotated[
         list[str] | None,
-        "需要查看的表名；省略时返回全部允许访问的业务表",
+        "需要查看具体列结构的表名；省略时返回紧凑表目录（无列级细节）",
     ] = None,
     *,
     runtime: ToolRuntime[AgentContext],
 ) -> dict[str, Any]:
     """读取允许访问的 ecommerce 表结构，不返回任何业务数据。"""
 
-    requested = tables or list(SCHEMA_CATALOG["tables"])
-    unknown = sorted(set(requested) - set(SCHEMA_CATALOG["tables"]))
+    if not tables:
+        return {
+            "success": True,
+            "schema": "ecommerce",
+            "compact_catalog": compact_catalog(),
+        }
+    unknown = sorted(set(tables) - set(SCHEMA_CATALOG["tables"]))
     if unknown:
         return {
             "success": False,
@@ -32,6 +37,6 @@ async def get_schema(
         "schema": "ecommerce",
         "tables": {
             name: SCHEMA_CATALOG["tables"][name]
-            for name in requested
+            for name in tables
         },
     }

@@ -104,3 +104,18 @@ def schema_fingerprint(catalog: dict[str, Any] | None = None) -> str:
         catalog = SCHEMA_CATALOG
     canonical = json.dumps(catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def compact_catalog() -> dict[str, Any]:
+    """返回常驻提示词的紧凑表目录：表名 + 一句话描述 + 关系，不含列级细节。"""
+
+    return {
+        "version": SCHEMA_CATALOG["version"],
+        "schema": SCHEMA_CATALOG["schema"],
+        "fingerprint": schema_fingerprint(),
+        "tables": {
+            name: meta["description"]
+            for name, meta in SCHEMA_CATALOG["tables"].items()
+        },
+        "relationships": SCHEMA_CATALOG["relationships"],
+    }

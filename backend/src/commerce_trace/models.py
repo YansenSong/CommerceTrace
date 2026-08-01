@@ -18,6 +18,7 @@ class QueryTrace(BaseModel):
     row_count: int = 0
     preview: list[dict[str, Any]] = Field(default_factory=list)
     execution_time_ms: float = 0
+    truncated: bool = False
 
 
 class Chart(BaseModel):

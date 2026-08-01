@@ -19,6 +19,7 @@ from .tools import (
     AgentContext,
     RunArtifacts,
     get_schema,
+    plan_query,
     run_sql,
     visualize_data,
 )
@@ -49,7 +50,7 @@ class Agent:
 
         self._agent = create_agent(
             model,
-            tools=[get_schema, run_sql, visualize_data],
+            tools=[get_schema, plan_query, run_sql, visualize_data],
             system_prompt=SYSTEM_PROMPT,
             middleware=middleware,
             context_schema=AgentContext,

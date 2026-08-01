@@ -19,8 +19,13 @@ async def _execute_sql(
     sql: str,
     row_limit: int,
     statement_timeout_ms: int,
-) -> list[dict[str, Any]]:
-    def operation() -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
+    """执行只读 SQL，返回 (行数据, 是否超过行数上限被截断)。
+
+    EXPLAIN 类语句不包装子查询，直接执行规划器输出，无截断。
+    """
+
+    def operation() -> tuple[list[dict[str, Any]], bool]:
         connection = sqlite3.connect(":memory:", check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute(
@@ -36,12 +41,15 @@ async def _execute_sql(
         try:
             if sql.upper().startswith("EXPLAIN "):
                 cursor = connection.execute(sql)
-            else:
-                cursor = connection.execute(
-                    f"SELECT * FROM ({sql}) AS commerce_trace_result LIMIT ?",
-                    (row_limit,),
-                )
-            return [dict(row) for row in cursor.fetchall()]
+                rows = [dict(row) for row in cursor.fetchall()]
+                return rows, False
+            cursor = connection.execute(
+                f"SELECT * FROM ({sql}) AS commerce_trace_result LIMIT ?",
+                (row_limit + 1,),
+            )
+            fetched = [dict(row) for row in cursor.fetchall()]
+            truncated = len(fetched) > row_limit
+            return fetched[:row_limit], truncated
         finally:
             connection.close()
 
@@ -63,13 +71,14 @@ async def run_sql(
     except SqlSafetyError as exc:
         return {
             "success": False,
+            "phase": "validate",
             "error": exc.code,
             "message": exc.safe_message,
         }
 
     started = time.perf_counter()
     try:
-        rows = await _execute_sql(
+        rows, truncated = await _execute_sql(
             context.database_path,
             validated.normalized_sql,
             validated.row_limit,
@@ -78,6 +87,7 @@ async def run_sql(
     except sqlite3.Error:
         return {
             "success": False,
+            "phase": "execute",
             "error": "query_failed",
             "message": "查询执行失败，请检查字段、筛选条件或聚合方式",
         }
@@ -92,6 +102,7 @@ async def run_sql(
         row_count=len(rows),
         preview=rows[:20],
         execution_time_ms=(time.perf_counter() - started) * 1_000,
+        truncated=truncated,
     )
     artifacts.queries.append(trace)
     artifacts.rows_by_query[query_id] = rows
@@ -100,6 +111,7 @@ async def run_sql(
         "query_id": query_id,
         "columns": columns,
         "row_count": len(rows),
+        "truncated": truncated,
         "rows": rows[:20],
         "preview_truncated": len(rows) > 20,
     }

@@ -7,7 +7,7 @@ FastAPI + LangChain 1.x + LangGraph SQLite checkpoint 的中文电商分析 Agen
 - `api.py`：REST API、匿名 cookie、会话所有权与错误契约。
 - `runtime.py`：组装 ChatDeepSeek、LangChain Agent、checkpointer 和存储。
 - `agent/service.py`：`create_agent`、标准 middleware、超时和会话并发控制。
-- `agent/tools.py`：`get_schema`、`run_sql`、`visualize_data` 三个 LangChain tools。
+- `agent/tools/`：`get_schema`、`plan_query`、`run_sql`、`visualize_data` 四个 LangChain tools。
 - `agent/sql_safety.py`：必须保留的 SQL AST 白名单安全边界。
 - `persistence/conversations.py`：用户可见会话目录与最终消息快照。
 - `persistence/sqlite.py`：只读业务查询执行器。
