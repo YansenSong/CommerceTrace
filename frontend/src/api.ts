@@ -3,6 +3,7 @@ import type {
   ChatResponse,
   ConversationCreate,
   ConversationSummary,
+  KnowledgeEntry,
   MessageHistory,
 } from './types'
 
@@ -60,4 +61,14 @@ export function sendMessage(
 
 export function deleteConversation(conversationId: string): Promise<void> {
   return request(`/api/conversations/${conversationId}`, { method: 'DELETE' })
+}
+
+export function confirmKnowledge(
+  question: string,
+  sqls: string[],
+): Promise<KnowledgeEntry> {
+  return request('/api/knowledge', {
+    method: 'POST',
+    body: JSON.stringify({ question, sqls }),
+  })
 }

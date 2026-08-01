@@ -21,3 +21,4 @@ class AgentContext:
     database_path: Path
     statement_timeout_ms: int
     sql_policy: SqlSafetyPolicy
+    few_shot: list[dict[str, Any]] = field(default_factory=list)

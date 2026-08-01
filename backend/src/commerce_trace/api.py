@@ -15,11 +15,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from .agent import Agent
 from .config import Config
+from .memory import KnowledgeEntry, MemoryStore
 from .models import (
     ChatResponse,
     ConversationCreate,
     ConversationList,
     ErrorBody,
+    KnowledgeConfirm,
     MessageCreate,
     MessageHistory,
 )
@@ -45,18 +47,21 @@ def create_app(config: Config | None = None) -> FastAPI:
             update={
                 "database_path": _project_path(config.database_path),
                 "agent_state_path": _project_path(config.agent_state_path),
+                "knowledge_dir": _project_path(config.knowledge_dir),
             }
         )
         configs.agent_state_path.parent.mkdir(parents=True, exist_ok=True)
         store = ConversationStore(configs.agent_state_path)
         await store.setup()
+        memory = MemoryStore(configs.knowledge_dir)
+        memory.setup()
         async with AsyncSqliteSaver.from_conn_string(
             str(configs.agent_state_path)
         ) as checkpointer:
             await checkpointer.setup()
             if configs.model_api_key is None:
                 raise ValueError("COMMERCE_TRACE_MODEL_API_KEY is required")
-            
+
             model = ChatDeepSeek(
                 model=configs.model,
                 api_key=configs.model_api_key,
@@ -69,11 +74,13 @@ def create_app(config: Config | None = None) -> FastAPI:
 
             app.state.config = configs
             app.state.store = store
+            app.state.memory = memory
 
             app.state.agent = Agent(
                 config=configs,
                 model=model,
                 checkpointer=checkpointer,
+                memory=memory,
             )
 
             app.state.checkpointer = checkpointer
@@ -202,6 +209,28 @@ def create_app(config: Config | None = None) -> FastAPI:
             raise _not_found()
         return Response(status_code=204)
 
+    @app.post(
+        "/api/knowledge",
+        response_model=KnowledgeEntry,
+        status_code=201,
+    )
+    async def confirm_knowledge(body: KnowledgeConfirm, request: Request) -> KnowledgeEntry:
+        return _memory(request).save(body.question, body.sqls, note=body.note)
+
+    @app.get("/api/knowledge", response_model=list[KnowledgeEntry])
+    async def list_knowledge(request: Request) -> list[KnowledgeEntry]:
+        return _memory(request).list_entries()
+
+    @app.delete("/api/knowledge/{slug}", status_code=204)
+    async def delete_knowledge(slug: str, request: Request) -> Response:
+        try:
+            deleted = _memory(request).delete(slug)
+        except ValueError:
+            raise _not_found() from None
+        if not deleted:
+            raise _not_found()
+        return Response(status_code=204)
+
     return app
 
 
@@ -215,6 +244,10 @@ def _config(request: Request) -> Config:
 
 def _store(request: Request) -> ConversationStore:
     return cast(ConversationStore, request.app.state.store)
+
+
+def _memory(request: Request) -> MemoryStore:
+    return cast(MemoryStore, request.app.state.memory)
 
 
 def _agent(request: Request) -> Agent:

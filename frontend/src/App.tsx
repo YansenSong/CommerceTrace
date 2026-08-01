@@ -9,6 +9,7 @@ import {
 } from 'react'
 
 import {
+  confirmKnowledge,
   createConversation,
   deleteConversation,
   getConversationMessages,
@@ -525,6 +526,8 @@ export default function App() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState<Set<string>>(new Set())
   const conversationEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -662,6 +665,35 @@ export default function App() {
   const askSuggestion = (suggestion: string) => {
     setQuestion(suggestion)
     window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const handleConfirm = async (message: Message) => {
+    const messageIndex = state.messages.indexOf(message)
+    if (messageIndex < 0) return
+    const userMessages = state.messages
+      .slice(0, messageIndex)
+      .filter((item) => item.role === 'user')
+    const question = userMessages.at(-1)?.content ?? message.content
+    const sqls = message.queries.map((query) => query.sql).filter((sql) => sql.trim())
+    if (!sqls.length) return
+    const messageKey = String(message.message_id)
+    setConfirming((prev) => new Set(prev).add(messageKey))
+    try {
+      await confirmKnowledge(question, sqls)
+      setConfirmed((prev) => new Set(prev).add(messageKey))
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '确认失败',
+      }))
+    } finally {
+      setConfirming((prev) => {
+        const next = new Set(prev)
+        next.delete(messageKey)
+        return next
+      })
+    }
   }
 
   const lastMessage = state.messages.at(-1)
@@ -828,6 +860,25 @@ export default function App() {
                           </Suspense>
                         </div>
                       )}
+                    {message.role === 'assistant' && replyEvidence.length > 0 && (
+                      <div className="confirm-row">
+                        <button
+                          type="button"
+                          className={`confirm-button${confirmed.has(String(message.message_id)) ? ' is-confirmed' : ''}`}
+                          disabled={confirming.has(String(message.message_id))}
+                          onClick={() => void handleConfirm(message)}
+                        >
+                          <span className="confirm-mark" aria-hidden="true">
+                            {confirmed.has(String(message.message_id)) ? '✓' : '✦'}
+                          </span>
+                          {confirmed.has(String(message.message_id))
+                            ? '已确认，可再次确认以更新'
+                            : confirming.has(String(message.message_id))
+                              ? '确认中…'
+                              : '确认此问答'}
+                        </button>
+                      </div>
+                    )}
                   </article>
                 )
               })}

@@ -17,6 +17,7 @@ class Config(BaseSettings):
 
     database_path: Path = Path("data/commerce_trace.db")
     agent_state_path: Path = Path("data/agent_state.db")
+    knowledge_dir: Path = Path("knowledge/sql")
     model_base_url: str = "https://api.deepseek.com"
     model_api_key: SecretStr | None = None
     model: str = "deepseek-chat"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def utc_now() -> datetime:
@@ -84,3 +84,17 @@ class ChatResponse(BaseModel):
 class ErrorBody(BaseModel):
     code: str
     message: str
+
+
+class KnowledgeConfirm(BaseModel):
+    question: str = Field(min_length=1, max_length=4_000)
+    sqls: list[str] = Field(min_length=1, max_length=20)
+    note: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("sqls")
+    @classmethod
+    def _clean_sqls(cls, value: list[str]) -> list[str]:
+        cleaned = [sql.strip() for sql in value if sql.strip()]
+        if not cleaned:
+            raise ValueError("至少需要一条 SQL")
+        return cleaned

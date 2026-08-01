@@ -12,7 +12,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ..config import Config
+from ..memory import MemoryStore
 from ..models import ChatResponse, Usage
+from .memory_middleware import FewShotMemoryMiddleware
 from .prompt import SYSTEM_PROMPT
 from .sql_safety import SqlSafetyPolicy
 from .tools import (
@@ -32,9 +34,11 @@ class Agent:
         config: Config,
         model: BaseChatModel,
         checkpointer: BaseCheckpointSaver[Any],
+        memory: MemoryStore | None = None,
     ) -> None:
         self._database_path = config.database_path.resolve()
         self._statement_timeout_ms = config.statement_timeout_ms
+        self._memory = memory
         self._sql_policy = SqlSafetyPolicy(
             max_rows=config.max_result_rows,
             max_distinct_values=config.max_distinct_values,
@@ -46,6 +50,7 @@ class Agent:
                 trigger=("messages", 30),
                 keep=("messages", 12),
             ),
+            FewShotMemoryMiddleware(),
         ]
 
         self._agent = create_agent(
@@ -65,13 +70,19 @@ class Agent:
         thread_id: str,
         message: str,
     ) -> ChatResponse:
-        
+
         artifacts = RunArtifacts()
         usage_callback = UsageMetadataCallbackHandler()
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id},
             "callbacks": [usage_callback],
         }
+
+        few_shot: list[dict[str, Any]] = []
+        if self._memory is not None:
+            few_shot = [
+                entry.model_dump(mode="json") for entry in self._memory.recall(message)
+            ]
 
         result = await self._agent.ainvoke(
             {"messages": [{"role": "user", "content": message}]},
@@ -81,6 +92,7 @@ class Agent:
                 database_path=self._database_path,
                 statement_timeout_ms=self._statement_timeout_ms,
                 sql_policy=self._sql_policy,
+                few_shot=few_shot,
             ),
         )
         

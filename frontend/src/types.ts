@@ -61,6 +61,16 @@ export interface ApiError {
   message: string
 }
 
+export interface KnowledgeEntry {
+  slug: string
+  question: string
+  sqls: string[]
+  created_at: string
+  updated_at: string
+  revision: number
+  note?: string | null
+}
+
 export interface ChatState {
   conversationId?: string
   messages: Message[]
