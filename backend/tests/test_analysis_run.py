@@ -25,11 +25,14 @@ class AnalysisRunMachineTests(unittest.TestCase):
         machine.publish_plan(
             [
                 AnalysisStepDraft(
+                    step_key="baseline",
                     title="核实销售额变化",
                     objective="比较两个周期的销售额",
                     completion_conditions=["取得两个周期的销售额、差额和变化率"],
                 ),
                 AnalysisStepDraft(
+                    step_key="channel_breakdown",
+                    depends_on=["baseline"],
                     title="拆解渠道贡献",
                     objective="比较各渠道变化",
                     completion_conditions=["取得各渠道变化金额和贡献率"],
@@ -64,6 +67,8 @@ class AnalysisRunMachineTests(unittest.TestCase):
         machine.revise_pending_steps(
             [
                 AnalysisStepDraft(
+                    step_key="category_breakdown",
+                    depends_on=["baseline"],
                     title="拆解品类贡献",
                     objective="按品类定位变化",
                     completion_conditions=["取得各品类变化金额和贡献率"],
@@ -77,6 +82,7 @@ class AnalysisRunMachineTests(unittest.TestCase):
         self.assertEqual(machine.run.plan.steps[0].status, AnalysisStepStatus.COMPLETED)
         self.assertEqual(machine.run.plan.steps[1].title, "拆解品类贡献")
         self.assertEqual(machine.run.plan.steps[1].status, AnalysisStepStatus.PENDING)
+        self.assertEqual(machine.run.plan.steps[1].depends_on, ["baseline"])
         self.assertEqual(
             [event.sequence for event in machine.events],
             list(range(1, len(machine.events) + 1)),
@@ -110,28 +116,40 @@ class AnalysisRunMachineTests(unittest.TestCase):
             summary="销售额为200元",
             facts={"revenue": 200},
         )
-        with self.assertRaisesRegex(AnalysisRunError, "step_conditions_not_met"):
-            machine.complete_step(
-                step.step_id,
-                evidence=[evidence],
-                condition_results=[
-                    CompletionConditionResult(
-                        condition=step.completion_conditions[0],
-                        satisfied=False,
-                        evidence_ids=[],
-                        explanation="查询没有使用标准销售额口径",
-                    )
-                ],
-            )
-
-        machine.complete_step(
+        failed = machine.complete_step(
             step.step_id,
             evidence=[evidence],
             condition_results=[
                 CompletionConditionResult(
                     condition=step.completion_conditions[0],
+                    satisfied=False,
+                    evidence_ids=[],
+                    explanation="查询没有使用标准销售额口径",
+                )
+            ],
+        )
+        self.assertEqual(failed.status, AnalysisStepStatus.FAILED)
+        self.assertEqual(machine.run.evidence, [evidence])
+        self.assertFalse(failed.completion_results[0].satisfied)
+        self.assertIn("查询没有使用", failed.error)
+
+        machine.finish_partial("已取得销售额，但口径未验证")
+        retried = machine.retry_failed_step()
+        machine.start_next_step()
+        corrected = AnalysisEvidence.from_query(
+            step_id=retried.step_id,
+            query_id="query_2",
+            summary="销售额为200元",
+            facts={"revenue": 200, "metric": "revenue"},
+        )
+        machine.complete_step(
+            retried.step_id,
+            evidence=[corrected],
+            condition_results=[
+                CompletionConditionResult(
+                    condition=retried.completion_conditions[0],
                     satisfied=True,
-                    evidence_ids=[evidence.evidence_id],
+                    evidence_ids=[corrected.evidence_id],
                     explanation="查询使用标准销售额口径并返回聚合值",
                 )
             ],
@@ -141,6 +159,32 @@ class AnalysisRunMachineTests(unittest.TestCase):
         self.assertEqual(machine.run.status, AnalysisRunStatus.COMPLETED)
         self.assertEqual(machine.run.answer, "销售额为200元")
         self.assertEqual(machine.run.evidence[0].facts, {"revenue": 200})
+
+    def test_step_dependencies_must_reference_prior_steps(self) -> None:
+        machine = AnalysisRunMachine.create(
+            conversation_id="conv_1",
+            user_id="user_1",
+            question="分析销售变化",
+        )
+
+        with self.assertRaisesRegex(AnalysisRunError, "plan_dependencies_invalid"):
+            machine.publish_plan(
+                [
+                    AnalysisStepDraft(
+                        step_key="breakdown",
+                        depends_on=["baseline"],
+                        title="先拆解",
+                        objective="拆解变化",
+                        completion_conditions=["取得贡献率"],
+                    ),
+                    AnalysisStepDraft(
+                        step_key="baseline",
+                        title="后核实",
+                        objective="核实变化",
+                        completion_conditions=["取得变化率"],
+                    ),
+                ]
+            )
 
     def test_failed_step_can_retry_without_rewriting_completed_history(self) -> None:
         machine = AnalysisRunMachine.create(

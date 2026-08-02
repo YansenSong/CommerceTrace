@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from ..analysis.models import AnalysisEvent, AnalysisRun
+from ..analysis.models import AnalysisEvent, AnalysisEventType, AnalysisRun
 from ..analysis.state_machine import AnalysisRunMachine
 
 
@@ -143,7 +143,7 @@ class AnalysisRunStore:
             AnalysisEvent(
                 run_id=run_id,
                 sequence=int(row["sequence"]),
-                event_type=str(row["event_type"]),
+                event_type=AnalysisEventType(str(row["event_type"])),
                 data=json.loads(str(row["payload_json"])),
                 created_at=datetime.fromisoformat(str(row["created_at"])),
             )

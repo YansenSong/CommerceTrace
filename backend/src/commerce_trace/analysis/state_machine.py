@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..models import utc_now
+from ..models import Chart, QueryTrace, Usage, utc_now
 from .models import (
     AnalysisEvent,
+    AnalysisEventType,
     AnalysisEvidence,
     AnalysisPlan,
     AnalysisRun,
@@ -54,20 +55,21 @@ class AnalysisRunMachine:
             max_plan_revisions=max_plan_revisions,
             max_plan_steps=max_plan_steps,
         )
-        machine._emit("run_created", {"status": machine.run.status})
+        machine._emit(AnalysisEventType.RUN_CREATED, {"status": machine.run.status})
         return machine
 
     def mark_planning(self) -> None:
         self._require_status(AnalysisRunStatus.QUEUED)
         self.run.status = AnalysisRunStatus.PLANNING
         self._touch()
-        self._emit("planning_started", {"status": self.run.status})
+        self._emit(AnalysisEventType.PLANNING_STARTED, {"status": self.run.status})
 
     def publish_plan(self, drafts: list[AnalysisStepDraft]) -> None:
         if not drafts:
             raise AnalysisRunError("plan_steps_required")
         if len(drafts) > self.max_plan_steps:
             raise AnalysisRunError("plan_step_limit_exceeded")
+        self._validate_dependencies(drafts)
         if self.run.plan is not None:
             raise AnalysisRunError("plan_already_published")
         if self.run.status not in {AnalysisRunStatus.QUEUED, AnalysisRunStatus.PLANNING}:
@@ -75,22 +77,68 @@ class AnalysisRunMachine:
         self.run.plan = AnalysisPlan(steps=[AnalysisStep(**draft.model_dump()) for draft in drafts])
         self.run.status = AnalysisRunStatus.RUNNING
         self._touch()
-        self._emit("plan_published", {"plan": self.run.plan.model_dump(mode="json")})
+        self._emit(
+            AnalysisEventType.PLAN_PUBLISHED,
+            {"plan": self.run.plan.model_dump(mode="json")},
+        )
 
     def start_next_step(self) -> AnalysisStep:
         plan = self._plan()
         if any(step.status == AnalysisStepStatus.IN_PROGRESS for step in plan.steps):
             raise AnalysisRunError("step_already_in_progress")
+        completed_keys = {
+            step.step_key
+            for step in plan.steps
+            if step.status == AnalysisStepStatus.COMPLETED
+        }
+        pending = [
+            step for step in plan.steps if step.status == AnalysisStepStatus.PENDING
+        ]
         step = next(
-            (step for step in plan.steps if step.status == AnalysisStepStatus.PENDING),
+            (item for item in pending if set(item.depends_on) <= completed_keys),
             None,
         )
         if step is None:
+            if pending:
+                raise AnalysisRunError("step_dependencies_blocked")
             raise AnalysisRunError("no_pending_step")
         step.status = AnalysisStepStatus.IN_PROGRESS
         self._touch()
-        self._emit("step_started", {"step": step.model_dump(mode="json")})
+        self._emit(
+            AnalysisEventType.STEP_STARTED,
+            {"step": step.model_dump(mode="json")},
+        )
         return step
+
+    def record_step_artifacts(
+        self,
+        step_id: str,
+        *,
+        queries: list[QueryTrace],
+        charts: list[Chart],
+        usage: Usage,
+    ) -> None:
+        """Attach execution artifacts through the state-machine boundary."""
+
+        step = self._step(step_id)
+        if step.status != AnalysisStepStatus.IN_PROGRESS:
+            raise AnalysisRunError("step_not_in_progress")
+        query_ids = {item.query_id for item in self.run.queries}
+        self.run.queries.extend(item for item in queries if item.query_id not in query_ids)
+        chart_ids = {item.chart_id for item in self.run.charts}
+        self.run.charts.extend(item for item in charts if item.chart_id not in chart_ids)
+        self.run.usage.input_tokens += usage.input_tokens
+        self.run.usage.output_tokens += usage.output_tokens
+        self._touch()
+        self._emit(
+            AnalysisEventType.STEP_ARTIFACTS_RECORDED,
+            {
+                "step_id": step_id,
+                "query_ids": [item.query_id for item in queries],
+                "chart_ids": [item.chart_id for item in charts],
+                "usage": usage.model_dump(mode="json"),
+            },
+        )
 
     def complete_step(
         self,
@@ -114,19 +162,42 @@ class AnalysisRunMachine:
             raise AnalysisRunError("step_condition_results_invalid")
         evidence_ids = {item.evidence_id for item in evidence}
         if any(
-            not item.satisfied
-            or not item.evidence_ids
+            (item.satisfied and not item.evidence_ids)
             or not set(item.evidence_ids).issubset(evidence_ids)
             for item in condition_results
         ):
-            raise AnalysisRunError("step_conditions_not_met")
-        step.status = AnalysisStepStatus.COMPLETED
-        step.evidence_ids.extend(item.evidence_id for item in evidence)
+            raise AnalysisRunError("step_condition_evidence_invalid")
+        step.evidence_ids.extend(
+            item.evidence_id
+            for item in evidence
+            if item.evidence_id not in step.evidence_ids
+        )
         step.completion_results = condition_results
-        self.run.evidence.extend(evidence)
+        known_evidence = {item.evidence_id for item in self.run.evidence}
+        self.run.evidence.extend(
+            item for item in evidence if item.evidence_id not in known_evidence
+        )
+        unmet = [item for item in condition_results if not item.satisfied]
+        if unmet:
+            step.status = AnalysisStepStatus.FAILED
+            step.error = "; ".join(item.explanation for item in unmet)
+            self._touch()
+            self._emit(
+                AnalysisEventType.STEP_FAILED,
+                {
+                    "step": step.model_dump(mode="json"),
+                    "evidence": [item.model_dump(mode="json") for item in evidence],
+                    "completion_results": [
+                        item.model_dump(mode="json") for item in condition_results
+                    ],
+                },
+            )
+            return step
+        step.status = AnalysisStepStatus.COMPLETED
+        step.error = None
         self._touch()
         self._emit(
-            "step_completed",
+            AnalysisEventType.STEP_COMPLETED,
             {
                 "step": step.model_dump(mode="json"),
                 "evidence": [item.model_dump(mode="json") for item in evidence],
@@ -144,7 +215,10 @@ class AnalysisRunMachine:
         step.status = AnalysisStepStatus.FAILED
         step.error = error
         self._touch()
-        self._emit("step_failed", {"step": step.model_dump(mode="json")})
+        self._emit(
+            AnalysisEventType.STEP_FAILED,
+            {"step": step.model_dump(mode="json")},
+        )
         return step
 
     def revise_pending_steps(
@@ -163,6 +237,11 @@ class AnalysisRunMachine:
         preserved = [step for step in plan.steps if step.status != AnalysisStepStatus.PENDING]
         if len(preserved) + len(replacements) > self.max_plan_steps:
             raise AnalysisRunError("plan_step_limit_exceeded")
+        candidate = [
+            *(AnalysisStepDraft(**step.model_dump()) for step in preserved),
+            *replacements,
+        ]
+        self._validate_dependencies(candidate)
         plan.steps = [
             *preserved,
             *(AnalysisStep(**draft.model_dump()) for draft in replacements),
@@ -172,7 +251,7 @@ class AnalysisRunMachine:
         self.run.plan_revision_count += 1
         self._touch()
         self._emit(
-            "plan_revised",
+            AnalysisEventType.PLAN_REVISED,
             {"plan": plan.model_dump(mode="json"), "reason": reason},
         )
 
@@ -185,7 +264,10 @@ class AnalysisRunMachine:
         self.run.answer = answer
         self.run.status = AnalysisRunStatus.COMPLETED
         self._touch()
-        self._emit("run_completed", {"answer": answer, "status": self.run.status})
+        self._emit(
+            AnalysisEventType.RUN_COMPLETED,
+            {"answer": answer, "status": self.run.status},
+        )
 
     def finish_partial(self, answer: str) -> None:
         plan = self._plan()
@@ -194,13 +276,19 @@ class AnalysisRunMachine:
         self.run.answer = answer
         self.run.status = AnalysisRunStatus.PARTIAL
         self._touch()
-        self._emit("run_partial", {"answer": answer, "status": self.run.status})
+        self._emit(
+            AnalysisEventType.RUN_PARTIAL,
+            {"answer": answer, "status": self.run.status},
+        )
 
     def fail_run(self, error: str) -> None:
         self.run.error = error
         self.run.status = AnalysisRunStatus.FAILED
         self._touch()
-        self._emit("run_failed", {"error": error, "status": self.run.status})
+        self._emit(
+            AnalysisEventType.RUN_FAILED,
+            {"error": error, "status": self.run.status},
+        )
 
     def retry_failed_step(self, step_id: str | None = None) -> AnalysisStep:
         if self.run.status not in {AnalysisRunStatus.FAILED, AnalysisRunStatus.PARTIAL}:
@@ -225,7 +313,7 @@ class AnalysisRunMachine:
         self.run.error = None
         self._touch()
         self._emit(
-            "run_retried",
+            AnalysisEventType.RUN_RETRIED,
             {"step": failed.model_dump(mode="json"), "status": self.run.status},
         )
         return failed
@@ -245,10 +333,20 @@ class AnalysisRunMachine:
         if self.run.status != status:
             raise AnalysisRunError("invalid_run_status")
 
+    @staticmethod
+    def _validate_dependencies(drafts: list[AnalysisStepDraft]) -> None:
+        seen: set[str] = set()
+        for draft in drafts:
+            if draft.step_key in seen or not set(draft.depends_on) <= seen:
+                raise AnalysisRunError("plan_dependencies_invalid")
+            if len(draft.depends_on) != len(set(draft.depends_on)):
+                raise AnalysisRunError("plan_dependencies_invalid")
+            seen.add(draft.step_key)
+
     def _touch(self) -> None:
         self.run.updated_at = utc_now()
 
-    def _emit(self, event_type: str, data: dict[str, Any]) -> None:
+    def _emit(self, event_type: AnalysisEventType, data: dict[str, Any]) -> None:
         self.run.event_sequence += 1
         self.events.append(
             AnalysisEvent(

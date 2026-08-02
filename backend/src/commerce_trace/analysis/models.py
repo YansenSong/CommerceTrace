@@ -27,7 +27,29 @@ class AnalysisStepStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class AnalysisEventType(StrEnum):
+    RUN_CREATED = "run_created"
+    PLANNING_STARTED = "planning_started"
+    PLAN_PUBLISHED = "plan_published"
+    PLAN_REVISED = "plan_revised"
+    STEP_STARTED = "step_started"
+    STEP_ARTIFACTS_RECORDED = "step_artifacts_recorded"
+    STEP_COMPLETED = "step_completed"
+    STEP_FAILED = "step_failed"
+    RUN_COMPLETED = "run_completed"
+    RUN_PARTIAL = "run_partial"
+    RUN_FAILED = "run_failed"
+    RUN_RETRIED = "run_retried"
+
+
 class AnalysisStepDraft(BaseModel):
+    step_key: str = Field(
+        default_factory=lambda: f"planned_{uuid4().hex[:8]}",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z][A-Za-z0-9_-]*$",
+    )
+    depends_on: list[str] = Field(default_factory=list, max_length=8)
     title: str = Field(min_length=1, max_length=120)
     objective: str = Field(min_length=1, max_length=500)
     completion_conditions: list[str] = Field(min_length=1, max_length=5)
@@ -107,6 +129,6 @@ class AnalysisRun(BaseModel):
 class AnalysisEvent(BaseModel):
     run_id: str
     sequence: int
-    event_type: str
+    event_type: AnalysisEventType
     data: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)

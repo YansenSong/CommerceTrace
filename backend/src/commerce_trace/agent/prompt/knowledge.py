@@ -12,3 +12,7 @@ RULES: list[dict[str, str]] = [
 METRICS: list[dict[str, Any]] = [
     metric.model_dump(mode="json") for metric in COMMERCE_SEMANTIC_MODEL.metrics
 ]
+DIMENSIONS: list[dict[str, Any]] = [
+    dimension.model_dump(mode="json")
+    for dimension in COMMERCE_SEMANTIC_MODEL.dimensions
+]

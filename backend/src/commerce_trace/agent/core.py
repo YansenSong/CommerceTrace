@@ -31,6 +31,7 @@ from .tools import (
     AgentContext,
     RunArtifacts,
     get_schema,
+    plan_metric_query,
     plan_query,
     run_sql,
     visualize_data,
@@ -67,7 +68,13 @@ class Agent:
 
         self._agent = create_agent(
             model,
-            tools=[get_schema, plan_query, run_sql, visualize_data],
+            tools=[
+                get_schema,
+                plan_metric_query,
+                plan_query,
+                run_sql,
+                visualize_data,
+            ],
             system_prompt=SYSTEM_PROMPT,
             middleware=middleware,
             context_schema=AgentContext,
@@ -159,6 +166,8 @@ class AnalysisAgentSession:
                         "你负责制定电商经营分析计划。计划项必须是业务分析目标，不得写成"
                         "get_schema、SQL 或工具调用。简单问题只生成一步；复杂问题最多六步。"
                         "每一步都要给出数据需求形式的完成条件，不得预设数据结论。"
+                        "为每一步给出稳定且唯一的 step_key；depends_on 只能引用前面"
+                        "步骤的 step_key，没有依赖时返回空列表。"
                     )
                 ),
                 HumanMessage(content=question),
@@ -265,6 +274,7 @@ class AnalysisAgentSession:
                     content=(
                         "判断新取得的数据事实是否要求调整尚未开始的分析步骤。"
                         "只有原计划无法回答问题时才修订；已完成步骤绝不能重写。"
+                        "新步骤的 depends_on 只能引用已完成步骤或更早的新步骤。"
                     )
                 ),
                 HumanMessage(

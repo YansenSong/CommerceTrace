@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class SemanticTable(BaseModel):
@@ -27,10 +27,25 @@ class SemanticMetric(BaseModel):
 
     id: str
     name: str
+    source_table: str
     version: str
     definition: str
     expression: str
     filters: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
+    deterministic_sql: bool = True
+
+
+class SemanticDimension(BaseModel):
+    """A governed grouping dimension backed by a physical column."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    name: str
+    source_table: str
+    column: str
+    synonyms: tuple[str, ...] = ()
 
 
 class SemanticRule(BaseModel):
@@ -52,7 +67,37 @@ class BusinessSemanticModel(BaseModel):
     tables: dict[str, SemanticTable]
     relationships: tuple[str, ...]
     metrics: tuple[SemanticMetric, ...]
+    dimensions: tuple[SemanticDimension, ...]
     rules: tuple[SemanticRule, ...]
+
+    @model_validator(mode="after")
+    def _validate_references_and_names(self) -> BusinessSemanticModel:
+        metric_names: set[str] = set()
+        dimension_ids: set[str] = set()
+        dimension_names: set[str] = set()
+        for metric in self.metrics:
+            if metric.source_table not in self.tables:
+                raise ValueError(f"metric {metric.id} references an unknown table")
+            for name in (metric.id, metric.name, *metric.synonyms):
+                normalized = name.casefold()
+                if normalized in metric_names:
+                    raise ValueError(f"duplicate metric name or synonym: {name}")
+                metric_names.add(normalized)
+        for dimension in self.dimensions:
+            if dimension.id in dimension_ids:
+                raise ValueError(f"duplicate dimension id: {dimension.id}")
+            dimension_ids.add(dimension.id)
+            for name in (dimension.id, dimension.name, *dimension.synonyms):
+                normalized = name.casefold()
+                if normalized in dimension_names:
+                    raise ValueError(f"duplicate dimension name or synonym: {name}")
+                dimension_names.add(normalized)
+            table = self.tables.get(dimension.source_table)
+            if table is None or dimension.column not in table.columns:
+                raise ValueError(
+                    f"dimension {dimension.id} references an unknown column"
+                )
+        return self
 
     @property
     def allowed_tables(self) -> set[str]:
@@ -79,6 +124,80 @@ class BusinessSemanticModel(BaseModel):
             if metric.id == metric_id:
                 return metric
         raise KeyError(metric_id)
+
+    def resolve_metric_id(self, name: str) -> str:
+        normalized = name.casefold()
+        for metric in self.metrics:
+            if normalized in {
+                candidate.casefold()
+                for candidate in (metric.id, metric.name, *metric.synonyms)
+            }:
+                return metric.id
+        raise KeyError(name)
+
+    def dimension(self, dimension_id: str) -> SemanticDimension:
+        for dimension in self.dimensions:
+            if dimension.id == dimension_id:
+                return dimension
+        raise KeyError(dimension_id)
+
+    def resolve_dimension_id(self, name: str) -> str:
+        normalized = name.casefold()
+        for dimension in self.dimensions:
+            if normalized in {
+                candidate.casefold()
+                for candidate in (
+                    dimension.id,
+                    dimension.name,
+                    *dimension.synonyms,
+                )
+            }:
+                return dimension.id
+        raise KeyError(name)
+
+    def render_metric_query(
+        self,
+        metric_name: str,
+        *,
+        dimension_ids: tuple[str, ...] = (),
+    ) -> str:
+        """Expand a supported governed metric into deterministic SQL."""
+
+        metric = self.metric(self.resolve_metric_id(metric_name))
+        if not metric.deterministic_sql:
+            raise ValueError(f"metric {metric.id} has no deterministic SQL expansion")
+        dimensions = [
+            self.dimension(self.resolve_dimension_id(item)) for item in dimension_ids
+        ]
+        if any(item.source_table != metric.source_table for item in dimensions):
+            raise ValueError("cross-table metric dimensions are not supported")
+
+        qualified_dimensions = [
+            f"{self.schema_name}.{item.source_table}.{item.column}"
+            for item in dimensions
+        ]
+        selections = [
+            *(f"{column} AS {item.id}" for column, item in zip(
+                qualified_dimensions, dimensions, strict=True
+            )),
+            f"{metric.expression} AS {metric.id}",
+        ]
+        sql = (
+            f"SELECT {', '.join(selections)} "
+            f"FROM {self.schema_name}.{metric.source_table}"
+        )
+        if metric.filters:
+            qualified_filters = [
+                condition.replace(
+                    f"{metric.source_table}.",
+                    f"{self.schema_name}.{metric.source_table}.",
+                )
+                for condition in metric.filters
+            ]
+            sql += f" WHERE {' AND '.join(qualified_filters)}"
+        if qualified_dimensions:
+            sql += f" GROUP BY {', '.join(qualified_dimensions)}"
+        return sql
 
     def schema_catalog(self) -> dict[str, Any]:
         return {
@@ -237,21 +356,26 @@ COMMERCE_SEMANTIC_MODEL = BusinessSemanticModel(
         SemanticMetric(
             id="revenue",
             name="销售额",
+            source_table="orders",
             version="1",
             definition="已支付或已完成订单的成交总额",
             expression="SUM(ecommerce.orders.total_amount)",
             filters=("orders.status IN ('paid', 'completed')",),
+            synonyms=("成交额", "营业额"),
         ),
         SemanticMetric(
             id="net_revenue",
             name="净销售额",
+            source_table="orders",
             version="1",
             definition="销售额减去退款金额",
             expression="revenue - SUM(ecommerce.refunds.amount)",
+            deterministic_sql=False,
         ),
         SemanticMetric(
             id="order_count",
             name="订单量",
+            source_table="orders",
             version="1",
             definition="订单记录数；回答时必须说明是否排除取消订单",
             expression="COUNT(DISTINCT ecommerce.orders.order_id)",
@@ -259,16 +383,59 @@ COMMERCE_SEMANTIC_MODEL = BusinessSemanticModel(
         SemanticMetric(
             id="aov",
             name="客单价",
+            source_table="orders",
             version="1",
             definition="销售额除以非取消订单量",
             expression="revenue / NULLIF(order_count, 0)",
+            deterministic_sql=False,
         ),
         SemanticMetric(
             id="refund_rate",
             name="退款率",
+            source_table="orders",
             version="1",
             definition="退款订单数除以已支付订单数",
             expression="refund_order_count / NULLIF(paid_order_count, 0)",
+            deterministic_sql=False,
+        ),
+    ),
+    dimensions=(
+        SemanticDimension(
+            id="order_channel",
+            name="订单渠道",
+            source_table="orders",
+            column="channel",
+            synonyms=("成交渠道",),
+        ),
+        SemanticDimension(
+            id="order_status",
+            name="订单状态",
+            source_table="orders",
+            column="status",
+        ),
+        SemanticDimension(
+            id="customer_region",
+            name="客户地区",
+            source_table="customers",
+            column="region",
+        ),
+        SemanticDimension(
+            id="acquisition_channel",
+            name="获客渠道",
+            source_table="customers",
+            column="acquisition_channel",
+        ),
+        SemanticDimension(
+            id="category",
+            name="商品品类",
+            source_table="categories",
+            column="name",
+        ),
+        SemanticDimension(
+            id="payment_method",
+            name="支付方式",
+            source_table="payments",
+            column="payment_method",
         ),
     ),
 )

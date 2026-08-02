@@ -44,6 +44,18 @@ class BusinessSemanticModelTests(unittest.TestCase):
         revenue = model.metric("revenue")
         self.assertEqual(revenue.name, "销售额")
         self.assertEqual(revenue.filters, ("orders.status IN ('paid', 'completed')",))
+        self.assertEqual(model.resolve_metric_id("成交额"), "revenue")
+        self.assertEqual(model.resolve_dimension_id("成交渠道"), "order_channel")
+        self.assertEqual(model.dimension("order_channel").column, "channel")
+
+        metric_sql = model.render_metric_query(
+            "revenue",
+            dimension_ids=("order_channel",),
+        )
+        self.assertIn("SUM(ecommerce.orders.total_amount) AS revenue", metric_sql)
+        self.assertIn("ecommerce.orders.channel AS order_channel", metric_sql)
+        self.assertIn("ecommerce.orders.status IN ('paid', 'completed')", metric_sql)
+        self.assertIn("GROUP BY ecommerce.orders.channel", metric_sql)
 
     def test_fingerprint_changes_with_semantic_version(self) -> None:
         original = COMMERCE_SEMANTIC_MODEL.fingerprint()

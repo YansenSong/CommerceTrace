@@ -22,6 +22,7 @@ import {
 } from './api'
 import type {
   AnalysisRun,
+  AnalysisEventType,
   Chart,
   ChatState,
   ConversationSummary,
@@ -579,7 +580,8 @@ function AnalysisPlanStatus({
           </li>
         ))}
       </ol>
-      {run.status === 'failed' && (
+      {(run.status === 'failed' || run.status === 'partial') &&
+        run.plan.steps.some((step) => step.status === 'failed') && (
         <button className="plan-retry" type="button" onClick={onRetry}>
           重试失败步骤
         </button>
@@ -681,7 +683,7 @@ export default function App() {
         }))
       }
     }
-    ;[
+    ;([
       'planning_started',
       'plan_published',
       'plan_revised',
@@ -691,7 +693,9 @@ export default function App() {
       'run_completed',
       'run_partial',
       'run_failed',
-    ].forEach((eventType) => source.addEventListener(eventType, () => void refreshRun()))
+    ] satisfies AnalysisEventType[]).forEach((eventType) =>
+      source.addEventListener(eventType, () => void refreshRun()),
+    )
     source.onerror = () => {
       setState((current) => ({
         ...current,

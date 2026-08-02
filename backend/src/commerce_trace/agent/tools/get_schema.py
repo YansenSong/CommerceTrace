@@ -32,6 +32,7 @@ async def get_schema(
             "error": "schema_table_denied",
             "message": "请求包含不允许访问的表",
         }
+    runtime.context.query_engine.acquire_tables(tables)
     return {
         "success": True,
         "schema": "ecommerce",

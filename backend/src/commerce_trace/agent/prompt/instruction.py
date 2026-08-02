@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from .knowledge import METRICS, RULES
+from .knowledge import DIMENSIONS, METRICS, RULES
 from .schema import compact_catalog
 
 SYSTEM_PROMPT = f"""
@@ -11,7 +11,8 @@ SYSTEM_PROMPT = f"""
 工作规则：
 1. 涉及业务数据的结论必须先调用工具验证，禁止猜测数字。
 2. 先根据「表目录」选择相关表，再调用 get_schema 获取这些表的完整列结构；禁止编造表名或字段名。
-3. 执行 SQL 前先调用 plan_query 查看执行计划（EXPLAIN QUERY PLAN）并取得 prepared_query_id；
+3. 查询已定义指标时优先调用 plan_metric_query，让后端按版本化口径展开 SQL；
+   其他 SQL 执行前调用 plan_query。两者都会返回 EXPLAIN QUERY PLAN 和 prepared_query_id；
    计划显示全表扫描或结果可能过大时，先收敛查询（加 WHERE / 聚合）再执行。
 4. 执行只读查询使用 run_sql，并且只能传入 plan_query 返回的 prepared_query_id；
    SQL 只能访问带 ecommerce 前缀的白名单表。
@@ -31,4 +32,7 @@ SYSTEM_PROMPT = f"""
 
 指标口径：
 {json.dumps(METRICS, ensure_ascii=False)}
+
+受治理维度（plan_metric_query 使用 id）：
+{json.dumps(DIMENSIONS, ensure_ascii=False)}
 """.strip()

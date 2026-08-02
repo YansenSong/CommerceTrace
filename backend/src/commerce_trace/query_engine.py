@@ -47,13 +47,54 @@ class QueryEngine:
         self._semantic_model = semantic_model
         self._prepared: dict[str, PreparedQuery] = {}
         self._results: dict[str, QueryResult] = {}
+        self._acquired_tables: set[str] = set()
         self._lock = asyncio.Lock()
+
+    def acquire_tables(self, tables: list[str]) -> None:
+        """Record tables whose column context was explicitly disclosed."""
+
+        unknown = set(tables) - self._semantic_model.allowed_tables
+        if unknown:
+            raise QueryEngineError(
+                "schema_table_denied",
+                "请求包含不允许访问的表",
+            )
+        self._acquired_tables.update(tables)
+
+    async def prepare_metric(
+        self,
+        metric_name: str,
+        *,
+        dimension_ids: tuple[str, ...] = (),
+        purpose: str,
+    ) -> PreparedQuery:
+        """Expand a governed metric, then pass it through normal preparation."""
+
+        try:
+            sql = self._semantic_model.render_metric_query(
+                metric_name,
+                dimension_ids=dimension_ids,
+            )
+        except (KeyError, ValueError) as exc:
+            raise QueryEngineError(
+                "semantic_metric_not_supported",
+                "指标或维度尚不支持确定性 SQL 展开",
+            ) from exc
+        return await self.prepare(sql, purpose=purpose)
 
     async def prepare(self, sql: str, *, purpose: str) -> PreparedQuery:
         try:
             validated = self._sql_policy.validate(sql)
         except SqlSafetyError as exc:
             raise QueryEngineError(exc.code, exc.safe_message) from exc
+
+        referenced_tables = _referenced_tables(validated.normalized_sql)
+        missing_context = referenced_tables - self._acquired_tables
+        if missing_context:
+            raise QueryEngineError(
+                "schema_context_required",
+                "查询必须先获取所有引用表的字段上下文",
+            )
 
         plan_sql = f"EXPLAIN QUERY PLAN {validated.normalized_sql}"
         try:
@@ -121,8 +162,11 @@ class QueryEngine:
         result = QueryResult(
             trace=QueryTrace(
                 query_id=f"query_{uuid4().hex[:12]}",
+                prepared_query_id=prepared.prepared_query_id,
                 purpose=prepared.purpose,
                 sql=prepared.normalized_sql,
+                plan=prepared.plan,
+                semantic_fingerprint=prepared.semantic_fingerprint,
                 columns=list(rows[0]) if rows else [],
                 row_count=len(rows),
                 preview=rows[:20],
@@ -188,3 +232,19 @@ def _alias_map(sql: str) -> dict[str, str]:
         if table.alias:
             mapping[table.alias.lower()] = table.name.lower()
     return mapping
+
+
+def _referenced_tables(sql: str) -> set[str]:
+    try:
+        statement = sqlglot.parse_one(sql, read="sqlite")
+    except ParseError:
+        return set()
+    cte_names = {
+        cte.alias_or_name.lower()
+        for cte in statement.find_all(exp.CTE)
+    }
+    return {
+        table.name.lower()
+        for table in statement.find_all(exp.Table)
+        if table.name.lower() not in cte_names
+    }

@@ -12,8 +12,11 @@ def utc_now() -> datetime:
 
 class QueryTrace(BaseModel):
     query_id: str
+    prepared_query_id: str | None = None
     purpose: str
     sql: str
+    plan: list[str] = Field(default_factory=list)
+    semantic_fingerprint: str | None = None
     columns: list[str] = Field(default_factory=list)
     row_count: int = 0
     preview: list[dict[str, Any]] = Field(default_factory=list)

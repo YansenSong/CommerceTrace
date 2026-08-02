@@ -15,7 +15,7 @@ FastAPI
   │         └─ 基于实际证据生成结论
   ├─ LangChain create_agent + ChatDeepSeek
   │    ├─ get_schema
-  │    ├─ plan_query → prepared_query_id → run_sql
+  │    ├─ plan_metric_query / plan_query → prepared_query_id → run_sql
   │    └─ visualize_data
   ├─ 版本化业务语义模型（Schema、关系、指标与治理规则）
   ├─ QueryEngine（SQL AST 校验、EXPLAIN、只读执行与幂等结果）
@@ -23,7 +23,7 @@ FastAPI
   └─ 会话、分析运行、事件与证据（HttpOnly cookie + SQLite）
 ```
 
-DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定业务分析步骤和解释结果，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行、实际证据必须逐条满足步骤完成条件。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
+DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定带前置依赖的业务分析步骤和解释结果，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行、实际证据必须逐条满足步骤完成条件。已取得事实但条件未全部满足时，运行保留查询、事实和未满足解释，以 `partial` 结束并可重试失败步骤。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
 
 ## 环境要求
 
@@ -143,10 +143,12 @@ npm run dev
 - `data/agent_state.db`：LangGraph checkpoints、会话目录与历史快照。
 - SQL 仅允许访问 `ecommerce` schema 中的八张白名单表。
 - `sqlglot` 校验只读 AST、危险函数、敏感值探索和行数上限。
-- `run_sql` 不再接受任意 SQL，只能执行 `plan_query` 签发且绑定语义模型指纹的 `prepared_query_id`。
+- 查询准备前必须通过 `get_schema` 取得所有引用表的列级上下文；紧凑表目录不会隐式授予 Schema 上下文。
+- 受治理核心指标由 `plan_metric_query` 按指标、维度和同义词确定性展开 SQL；其他只读 SQL 使用 `plan_query`。
+- `run_sql` 不接受任意 SQL，只能执行准备阶段签发且绑定语义模型指纹的 `prepared_query_id`。
 - 只读执行通过内存库 `ATTACH` 业务库并开启 `PRAGMA query_only = ON` 完成，单条语句带执行超时。
 - `DISTINCT` 值级探索仅允许低基数字段（地区、获客渠道、订单渠道、订单状态、品类、支付方式）；客户姓名、地址、电话、邮箱等敏感字段禁止。
-- 历史查询轨迹只保存 SQL、列名、行数和最多 20 行预览。
+- 历史查询轨迹保存 prepared query ID、语义指纹、EXPLAIN 计划、SQL、列名、行数和最多 20 行预览。
 
 ## 代码检查
 

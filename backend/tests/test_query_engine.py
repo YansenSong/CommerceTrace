@@ -46,6 +46,7 @@ class QueryEngineTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_query_must_be_prepared_and_execution_is_idempotent(self) -> None:
+        self.engine.acquire_tables(["orders"])
         prepared = await asyncio.wait_for(
             self.engine.prepare(
                 "SELECT SUM(total_amount) AS revenue FROM ecommerce.orders",
@@ -70,6 +71,34 @@ class QueryEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.trace.query_id, second.trace.query_id)
         self.assertEqual(first.rows, [{"revenue": 200.0}])
         self.assertFalse(first.trace.truncated)
+        self.assertEqual(first.trace.plan, prepared.plan)
+        self.assertEqual(first.trace.prepared_query_id, prepared.prepared_query_id)
+
+    async def test_query_cannot_prepare_before_schema_context_is_acquired(self) -> None:
+        with self.assertRaisesRegex(QueryEngineError, "schema_context_required"):
+            await self.engine.prepare(
+                "SELECT SUM(total_amount) AS revenue FROM ecommerce.orders",
+                purpose="计算销售额",
+            )
+
+    async def test_governed_metric_is_expanded_before_preparation(self) -> None:
+        self.engine.acquire_tables(["orders"])
+
+        prepared = await self.engine.prepare_metric(
+            "成交额",
+            dimension_ids=("order_channel",),
+            purpose="按渠道计算销售额",
+        )
+        result = await self.engine.execute(prepared.prepared_query_id)
+
+        self.assertIn("SUM(ecommerce.orders.total_amount)", prepared.normalized_sql)
+        self.assertEqual(
+            result.rows,
+            [
+                {"order_channel": "app", "revenue": 120.0},
+                {"order_channel": "web", "revenue": 80.0},
+            ],
+        )
 
     async def test_unknown_prepared_query_cannot_execute(self) -> None:
         with self.assertRaisesRegex(QueryEngineError, "prepared_query_not_found"):

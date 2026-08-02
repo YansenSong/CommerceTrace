@@ -86,30 +86,27 @@ class AnalysisWorkflow:
                     step=step,
                     prior_evidence=list(machine.run.evidence),
                 )
-                machine.complete_step(
+                machine.record_step_artifacts(
+                    step.step_id,
+                    queries=execution.queries,
+                    charts=execution.charts,
+                    usage=execution.usage,
+                )
+                completed_step = machine.complete_step(
                     step.step_id,
                     evidence=execution.evidence,
                     condition_results=execution.condition_results,
                 )
-                machine.run.queries.extend(
-                    query
-                    for query in execution.queries
-                    if all(
-                        existing.query_id != query.query_id
-                        for existing in machine.run.queries
-                    )
-                )
-                machine.run.charts.extend(
-                    chart
-                    for chart in execution.charts
-                    if all(
-                        existing.chart_id != chart.chart_id
-                        for existing in machine.run.charts
-                    )
-                )
-                machine.run.usage.input_tokens += execution.usage.input_tokens
-                machine.run.usage.output_tokens += execution.usage.output_tokens
                 await self._persist(machine)
+
+                if completed_step.status == AnalysisStepStatus.FAILED:
+                    answer = await self._agent.synthesize(
+                        question=machine.run.question,
+                        evidence=list(machine.run.evidence),
+                    )
+                    machine.finish_partial(answer)
+                    await self._persist(machine)
+                    return
 
                 pending = self._pending_steps(machine)
                 revisions_remaining = (
@@ -145,7 +142,7 @@ class AnalysisWorkflow:
             if isinstance(exc, AnalysisRunError) and str(exc) in {
                 "step_evidence_required",
                 "step_condition_results_invalid",
-                "step_conditions_not_met",
+                "step_condition_evidence_invalid",
             }:
                 return
             raise

@@ -151,8 +151,9 @@ class AnalysisApiTests(unittest.TestCase):
         ).json()
         run_id = created["run_id"]
 
-        failed = self._wait_for_status(run_id, "failed")
+        failed = self._wait_for_status(run_id, "partial")
         self.assertEqual(failed["plan"]["steps"][0]["status"], "failed")
+        self.assertEqual(failed["evidence"][0]["facts"], {"revenue": 200})
 
         deadline = time.monotonic() + 2
         retry_response = self.client.post(f"/api/analysis-runs/{run_id}/retry")

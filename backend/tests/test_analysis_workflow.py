@@ -15,6 +15,7 @@ from commerce_trace.analysis.workflow import (
     PlanRevision,
     StepExecution,
 )
+from commerce_trace.models import QueryTrace
 
 
 class FakeAnalysisAgent:
@@ -118,6 +119,62 @@ class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(machine.run.plan.revision, 2)
         self.assertEqual(machine.run.answer, "基于2条证据完成分析")
         self.assertEqual(persisted_sequences, list(range(1, len(persisted_sequences) + 1)))
+
+    async def test_unmet_completion_condition_finishes_partial_with_facts(self) -> None:
+        machine = AnalysisRunMachine.create(
+            conversation_id="conv_1",
+            user_id="user_1",
+            question="为什么销售额下降？",
+        )
+        agent = FakeAnalysisAgent()
+
+        async def unsatisfied_execute(**kwargs: object) -> StepExecution:
+            step = kwargs["step"]
+            assert isinstance(step, AnalysisStep)
+            evidence = AnalysisEvidence.from_query(
+                step_id=step.step_id,
+                query_id="query_partial",
+                summary="只取得当期销售额",
+                facts={"current_revenue": 96},
+            )
+            return StepExecution(
+                summary="对比周期数据不足",
+                evidence=[evidence],
+                queries=[
+                    QueryTrace(
+                        query_id="query_partial",
+                        prepared_query_id="prepared_partial",
+                        purpose="取得当期销售额",
+                        sql="SELECT 96 AS current_revenue",
+                        plan=["SCAN CONSTANT ROW"],
+                        semantic_fingerprint="semantic-v1",
+                        columns=["current_revenue"],
+                        row_count=1,
+                        preview=[{"current_revenue": 96}],
+                    )
+                ],
+                condition_results=[
+                    CompletionConditionResult(
+                        condition=step.completion_conditions[0],
+                        satisfied=False,
+                        evidence_ids=[evidence.evidence_id],
+                        explanation="缺少上一周期销售额",
+                    )
+                ],
+            )
+
+        agent.execute_step = unsatisfied_execute  # type: ignore[method-assign]
+
+        async def persist(current: AnalysisRunMachine) -> None:
+            current.events.clear()
+
+        await AnalysisWorkflow(agent=agent, persist=persist).execute(machine)
+
+        self.assertEqual(machine.run.status, AnalysisRunStatus.PARTIAL)
+        self.assertEqual(machine.run.plan.steps[0].status, "failed")
+        self.assertEqual(machine.run.evidence[0].facts, {"current_revenue": 96})
+        self.assertEqual(machine.run.queries[0].plan, ["SCAN CONSTANT ROW"])
+        self.assertIn("缺少上一周期", machine.run.plan.steps[0].error)
 
 
 if __name__ == "__main__":

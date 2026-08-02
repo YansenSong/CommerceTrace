@@ -1,7 +1,10 @@
 export interface QueryTrace {
   query_id: string
+  prepared_query_id?: string | null
   purpose: string
   sql: string
+  plan: string[]
+  semantic_fingerprint?: string | null
   columns: string[]
   row_count: number
   preview: Array<Record<string, unknown>>
@@ -24,8 +27,24 @@ export type AnalysisStepStatus =
   | 'failed'
   | 'skipped'
 
+export type AnalysisEventType =
+  | 'run_created'
+  | 'planning_started'
+  | 'plan_published'
+  | 'plan_revised'
+  | 'step_started'
+  | 'step_artifacts_recorded'
+  | 'step_completed'
+  | 'step_failed'
+  | 'run_completed'
+  | 'run_partial'
+  | 'run_failed'
+  | 'run_retried'
+
 export interface AnalysisStep {
   step_id: string
+  step_key: string
+  depends_on: string[]
   title: string
   objective: string
   completion_conditions: string[]

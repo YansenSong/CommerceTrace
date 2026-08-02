@@ -3,6 +3,7 @@
 from .coordinator import AnalysisAgentFactory, AnalysisCoordinator
 from .models import (
     AnalysisEvent,
+    AnalysisEventType,
     AnalysisEvidence,
     AnalysisPlan,
     AnalysisRun,
@@ -16,6 +17,7 @@ from .state_machine import AnalysisRunError, AnalysisRunMachine
 
 __all__ = [
     "AnalysisEvent",
+    "AnalysisEventType",
     "AnalysisAgentFactory",
     "AnalysisCoordinator",
     "AnalysisEvidence",
