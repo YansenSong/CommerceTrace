@@ -10,13 +10,18 @@ import {
 
 import {
   confirmKnowledge,
+  createAnalysisRun,
   createConversation,
   deleteConversation,
+  getAnalysisRun,
   getConversationMessages,
+  getLatestAnalysisRun,
   listConversations,
-  sendMessage,
+  openAnalysisEventStream,
+  retryAnalysisRun,
 } from './api'
 import type {
+  AnalysisRun,
   Chart,
   ChatState,
   ConversationSummary,
@@ -514,6 +519,75 @@ const suggestions = [
   '最近三个月销售趋势如何？',
 ]
 
+const terminalRunStatuses = new Set(['completed', 'partial', 'failed'])
+
+function statusForRun(run: AnalysisRun): Pick<ChatState, 'status' | 'statusMessage'> {
+  const activeStep = run.plan?.steps.find((step) => step.status === 'in_progress')
+  if (run.status === 'completed') {
+    return { status: 'completed', statusMessage: '分析完成' }
+  }
+  if (run.status === 'partial') {
+    return { status: 'partial', statusMessage: '部分完成' }
+  }
+  if (run.status === 'failed') {
+    return { status: 'error', statusMessage: run.error ?? '分析失败' }
+  }
+  if (run.status === 'planning') {
+    return { status: 'working', statusMessage: '正在生成分析计划' }
+  }
+  return {
+    status: 'working',
+    statusMessage: activeStep ? `正在执行：${activeStep.title}` : '等待执行分析计划',
+  }
+}
+
+function AnalysisPlanStatus({
+  run,
+  onRetry,
+}: {
+  run: AnalysisRun
+  onRetry: () => void
+}) {
+  if (!run.plan) return null
+  return (
+    <section className="analysis-plan-card" aria-label="分析计划">
+      <div className="analysis-plan-heading">
+        <div>
+          <span>ANALYSIS PLAN</span>
+          <h2>分析计划</h2>
+        </div>
+        <small>修订 {run.plan.revision}</small>
+      </div>
+      {run.plan.revision_reason && (
+        <p className="plan-revision">计划调整：{run.plan.revision_reason}</p>
+      )}
+      <ol className="plan">
+        {run.plan.steps.map((step, index) => (
+          <li className={step.status} key={step.step_id}>
+            <div className="plan-rail">
+              <span>{step.status === 'completed' ? '✓' : index + 1}</span>
+              <i />
+            </div>
+            <div>
+              <strong>{step.title}</strong>
+              <small>
+                {step.status === 'failed'
+                  ? step.error ?? '步骤失败'
+                  : step.completion_conditions.join('；')}
+              </small>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {run.status === 'failed' && (
+        <button className="plan-retry" type="button" onClick={onRetry}>
+          重试失败步骤
+        </button>
+      )}
+    </section>
+  )
+}
+
 const emptyState: ChatState = {
   messages: [],
   status: 'idle',
@@ -530,6 +604,8 @@ export default function App() {
   const [confirming, setConfirming] = useState<Set<string>>(new Set())
   const conversationEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const completedRunIdsRef = useRef<Set<string>>(new Set())
 
   const refreshHistory = async () => {
     try {
@@ -543,12 +619,107 @@ export default function App() {
     void refreshHistory()
   }, [])
 
+  useEffect(() => () => eventSourceRef.current?.close(), [])
+
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({
       behavior: state.status === 'working' ? 'smooth' : 'auto',
       block: 'end',
     })
   }, [state.messages, state.status])
+
+  const finishRun = (run: AnalysisRun) => {
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+    setState((current) => {
+      const runStatus = statusForRun(run)
+      if (!run.answer || completedRunIdsRef.current.has(run.run_id)) {
+        return { ...current, ...runStatus, activeRun: run }
+      }
+      completedRunIdsRef.current.add(run.run_id)
+      const assistantMessage: Message = {
+        message_id: `assistant-${run.run_id}`,
+        role: 'assistant',
+        content: run.answer,
+        queries: run.queries,
+        charts: run.charts,
+        usage: run.usage,
+        created_at: run.updated_at,
+      }
+      return {
+        ...current,
+        ...runStatus,
+        activeRun: run,
+        messages: [...current.messages, assistantMessage],
+      }
+    })
+    void refreshHistory()
+  }
+
+  const watchRun = (runId: string) => {
+    eventSourceRef.current?.close()
+    const source = openAnalysisEventStream(runId)
+    eventSourceRef.current = source
+
+    const refreshRun = async () => {
+      try {
+        const run = await getAnalysisRun(runId)
+        if (terminalRunStatuses.has(run.status)) {
+          finishRun(run)
+          return
+        }
+        setState((current) => ({
+          ...current,
+          ...statusForRun(run),
+          activeRun: run,
+        }))
+      } catch (error) {
+        setState((current) => ({
+          ...current,
+          status: 'error',
+          statusMessage: error instanceof Error ? error.message : '任务恢复失败',
+        }))
+      }
+    }
+    ;[
+      'planning_started',
+      'plan_published',
+      'plan_revised',
+      'step_started',
+      'step_completed',
+      'step_failed',
+      'run_completed',
+      'run_partial',
+      'run_failed',
+    ].forEach((eventType) => source.addEventListener(eventType, () => void refreshRun()))
+    source.onerror = () => {
+      setState((current) => ({
+        ...current,
+        statusMessage: '连接中断，正在恢复分析进度',
+      }))
+    }
+    void refreshRun()
+  }
+
+  const retryRun = async () => {
+    const runId = state.activeRun?.run_id
+    if (!runId) return
+    try {
+      const run = await retryAnalysisRun(runId)
+      setState((current) => ({
+        ...current,
+        ...statusForRun(run),
+        activeRun: run,
+      }))
+      watchRun(run.run_id)
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        statusMessage: error instanceof Error ? error.message : '重试失败',
+      }))
+    }
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -577,24 +748,14 @@ export default function App() {
         status: 'working',
         statusMessage: '正在分析问题',
       }))
-      const result = await sendMessage(conversationId, value)
-      const assistantMessage: Message = {
-        message_id: `assistant-${crypto.randomUUID()}`,
-        role: 'assistant',
-        content: result.answer,
-        queries: result.queries,
-        charts: result.charts,
-        usage: result.usage,
-        created_at: new Date().toISOString(),
-      }
+      const run = await createAnalysisRun(conversationId, value)
       setState((current) => ({
         ...current,
         conversationId,
-        messages: [...current.messages, assistantMessage],
-        status: 'completed',
-        statusMessage: '分析完成',
+        ...statusForRun(run),
+        activeRun: run,
       }))
-      await refreshHistory()
+      watchRun(run.run_id)
     } catch (error) {
       setState((current) => ({
         ...current,
@@ -607,6 +768,8 @@ export default function App() {
 
   const startNewChat = async () => {
     try {
+      eventSourceRef.current?.close()
+      eventSourceRef.current = null
       const conversation = await createConversation()
       setState({
         ...emptyState,
@@ -628,13 +791,25 @@ export default function App() {
   const openConversation = async (conversationId: string) => {
     setLoadingHistory(true)
     try {
+      eventSourceRef.current?.close()
+      eventSourceRef.current = null
       const history = await getConversationMessages(conversationId)
+      let latestRun: AnalysisRun | undefined
+      try {
+        latestRun = await getLatestAnalysisRun(conversationId)
+      } catch {
+        // Conversations created before durable analysis runs have no run state.
+      }
       setState({
         conversationId,
         messages: history.messages,
-        status: 'idle',
-        statusMessage: '会话已加载',
+        ...(latestRun
+          ? { ...statusForRun(latestRun), activeRun: latestRun }
+          : { status: 'idle' as const, statusMessage: '会话已加载' }),
       })
+      if (latestRun && !terminalRunStatuses.has(latestRun.status)) {
+        watchRun(latestRun.run_id)
+      }
       setSidebarOpen(false)
     } catch (error) {
       setState((current) => ({
@@ -891,6 +1066,10 @@ export default function App() {
                   </div>
                   <p>{state.statusMessage}</p>
                 </div>
+              )}
+
+              {state.activeRun?.plan && (
+                <AnalysisPlanStatus run={state.activeRun} onRetry={() => void retryRun()} />
               )}
             </div>
 

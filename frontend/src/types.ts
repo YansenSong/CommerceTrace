@@ -6,6 +6,69 @@ export interface QueryTrace {
   row_count: number
   preview: Array<Record<string, unknown>>
   execution_time_ms: number
+  truncated: boolean
+}
+
+export type AnalysisRunStatus =
+  | 'queued'
+  | 'planning'
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+
+export type AnalysisStepStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+
+export interface AnalysisStep {
+  step_id: string
+  title: string
+  objective: string
+  completion_conditions: string[]
+  status: AnalysisStepStatus
+  evidence_ids: string[]
+  completion_results: Array<{
+    condition: string
+    satisfied: boolean
+    evidence_ids: string[]
+    explanation: string
+  }>
+  error?: string | null
+}
+
+export interface AnalysisPlan {
+  revision: number
+  revision_reason?: string | null
+  steps: AnalysisStep[]
+}
+
+export interface AnalysisEvidence {
+  evidence_id: string
+  step_id: string
+  query_id: string
+  summary: string
+  facts: Record<string, unknown>
+  created_at: string
+}
+
+export interface AnalysisRun {
+  run_id: string
+  conversation_id: string
+  question: string
+  status: AnalysisRunStatus
+  plan?: AnalysisPlan | null
+  evidence: AnalysisEvidence[]
+  queries: QueryTrace[]
+  charts: Chart[]
+  answer?: string | null
+  error?: string | null
+  usage: Usage
+  created_at: string
+  updated_at: string
 }
 
 export interface Chart {
@@ -74,6 +137,7 @@ export interface KnowledgeEntry {
 export interface ChatState {
   conversationId?: string
   messages: Message[]
-  status: 'idle' | 'working' | 'completed' | 'error'
+  status: 'idle' | 'working' | 'completed' | 'partial' | 'error'
   statusMessage: string
+  activeRun?: AnalysisRun
 }

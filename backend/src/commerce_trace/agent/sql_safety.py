@@ -6,6 +6,8 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
+from ..semantic import COMMERCE_SEMANTIC_MODEL, BusinessSemanticModel
+
 
 class SqlSafetyError(ValueError):
     """表示带有安全错误码、可向用户展示的 SQL 校验异常。"""
@@ -29,27 +31,6 @@ class ValidatedSql:
 
 class SqlSafetyPolicy:
     """限制查询范围、语句类型、字段探索和危险数据库函数。"""
-
-    allowed_schema = "ecommerce"
-    allowed_tables = {
-        "customers",
-        "categories",
-        "products",
-        "orders",
-        "order_items",
-        "payments",
-        "refunds",
-        "inventory_snapshots",
-    }
-    exploration_columns = {
-        ("customers", "region"),
-        ("customers", "acquisition_channel"),
-        ("categories", "name"),
-        ("orders", "status"),
-        ("orders", "channel"),
-        ("payments", "payment_method"),
-    }
-    sensitive_columns = {"name", "address", "phone", "email", "contact"}
     dangerous_functions = {
         "pg_sleep",
         "dblink",
@@ -61,11 +42,20 @@ class SqlSafetyPolicy:
         "current_setting",
     }
 
-    def __init__(self, max_rows: int = 500, max_distinct_values: int = 50) -> None:
+    def __init__(
+        self,
+        max_rows: int = 500,
+        max_distinct_values: int = 50,
+        semantic_model: BusinessSemanticModel = COMMERCE_SEMANTIC_MODEL,
+    ) -> None:
         """设置普通查询和去重探索查询的最大返回行数。"""
 
         self.max_rows = max_rows
         self.max_distinct_values = max_distinct_values
+        self.allowed_schema = semantic_model.schema_name
+        self.allowed_tables = semantic_model.allowed_tables
+        self.exploration_columns = semantic_model.exploration_columns
+        self.sensitive_columns = semantic_model.sensitive_columns
 
     def validate(self, sql: str) -> ValidatedSql:
         """解析并校验 SQL，返回可安全执行的规范化查询。"""
@@ -163,7 +153,7 @@ class SqlSafetyPolicy:
         table_name = tables[0].name.lower()
         column_name = column.name.lower()
         if (
-            column_name in self.sensitive_columns
+            (table_name, column_name) in self.sensitive_columns
             or (
                 table_name,
                 column_name,

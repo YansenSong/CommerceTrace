@@ -1186,6 +1186,51 @@ tbody tr:hover td { background: #f7f9f7; }
   list-style: none;
 }
 
+.analysis-plan-card {
+  width: min(720px, calc(100% - 48px));
+  margin: 18px 0 8px 46px;
+  padding: 20px 22px 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--brand-soft));
+  box-shadow: 0 10px 30px rgb(33 49 39 / 5%);
+}
+
+.analysis-plan-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.analysis-plan-heading span {
+  color: var(--brand);
+  font-family: "Fira Code", monospace;
+  font-size: 9px;
+  letter-spacing: .14em;
+}
+
+.analysis-plan-heading h2 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.analysis-plan-heading small,
+.plan-revision {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.plan-revision {
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: var(--warning-soft);
+  color: #80501f;
+  line-height: 1.5;
+}
+
 .plan li {
   display: grid;
   min-height: 65px;
@@ -1234,6 +1279,7 @@ tbody tr:hover td { background: #f7f9f7; }
 .plan small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .plan li.completed .plan-rail span { border-color: var(--brand); background: var(--brand); color: #fff; }
 .plan li.completed strong { color: var(--ink); }
+.plan li.completed strong { text-decoration: line-through; text-decoration-color: #9eb2a6; }
 .plan li.in_progress .plan-rail span {
   border-color: #d5b078;
   background: var(--warning-soft);
@@ -1242,6 +1288,19 @@ tbody tr:hover td { background: #f7f9f7; }
 }
 .plan li.in_progress strong { color: var(--warning); }
 .plan li.failed .plan-rail span { border-color: #e3b2b2; background: var(--danger-soft); color: var(--danger); }
+.plan li.skipped { opacity: .58; }
+
+.plan-retry {
+  margin: 0 0 14px 37px;
+  padding: 8px 12px;
+  border: 1px solid #e3b2b2;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
 
 .tool-section {
   margin-top: 22px;

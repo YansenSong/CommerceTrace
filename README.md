@@ -6,18 +6,24 @@ CommerceTrace（商迹）是一个基于 LangChain 的中文电商经营分析 A
 
 ```text
 React
-  │ REST JSON
+  │ REST JSON + SSE
 FastAPI
-  ├─ LangChain create_agent
-  │    ├─ ChatDeepSeek
-  │    ├─ get_schema / run_sql / visualize_data
-  │    ├─ 长对话摘要中间件（SummarizationMiddleware）
-  │    └─ 业务指标口径与 schema 目录（注入系统提示词）
+  ├─ AnalysisCoordinator（持久化后台分析运行）
+  │    └─ AnalysisWorkflow
+  │         ├─ 生成并发布可见分析计划
+  │         ├─ 逐项执行、完成条件判定与受限修订
+  │         └─ 基于实际证据生成结论
+  ├─ LangChain create_agent + ChatDeepSeek
+  │    ├─ get_schema
+  │    ├─ plan_query → prepared_query_id → run_sql
+  │    └─ visualize_data
+  ├─ 版本化业务语义模型（Schema、关系、指标与治理规则）
+  ├─ QueryEngine（SQL AST 校验、EXPLAIN、只读执行与幂等结果）
   ├─ LangGraph SQLite checkpointer
-  └─ 匿名用户与会话目录（HttpOnly cookie + SQLite）
+  └─ 会话、分析运行、事件与证据（HttpOnly cookie + SQLite）
 ```
 
-项目仅保留业务必要的自有代码：SQL AST 安全校验、只读执行、图表生成、提示词与 schema 目录、会话目录和访问控制。模型适配、消息协议、工具调用循环、调用限制、长对话摘要与 checkpoint 均由 LangChain/LangGraph 提供。
+DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定业务分析步骤和解释结果，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行、实际证据必须逐条满足步骤完成条件。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
 
 ## 环境要求
 
@@ -97,6 +103,11 @@ npm run dev
 | `GET` | `/api/conversations` | 分页列出当前匿名用户的会话 |
 | `GET` | `/api/conversations/{id}/messages` | 获取历史消息与查询/图表快照 |
 | `POST` | `/api/conversations/{id}/messages` | 发送消息并获得最终 JSON 回答 |
+| `POST` | `/api/conversations/{id}/analysis-runs` | 创建后台分析运行，立即返回运行状态 |
+| `GET` | `/api/conversations/{id}/analysis-runs/latest` | 获取会话最近一次分析运行 |
+| `GET` | `/api/analysis-runs/{run_id}` | 获取计划、步骤、证据与最终状态 |
+| `GET` | `/api/analysis-runs/{run_id}/events` | 通过 SSE 接收有序运行事件 |
+| `POST` | `/api/analysis-runs/{run_id}/retry` | 重试失败步骤，不改写已完成历史 |
 | `DELETE` | `/api/conversations/{id}` | 永久删除会话和 checkpoints |
 
 发送消息：
@@ -107,7 +118,9 @@ npm run dev
 }
 ```
 
-响应：
+新的交互界面使用后台分析运行接口。创建成功返回 `202`，其中包含 `run_id`、当前状态以及随后生成的分析计划；客户端再订阅事件流。原同步消息接口继续保留兼容性。
+
+同步接口响应：
 
 ```json
 {
@@ -130,15 +143,17 @@ npm run dev
 - `data/agent_state.db`：LangGraph checkpoints、会话目录与历史快照。
 - SQL 仅允许访问 `ecommerce` schema 中的八张白名单表。
 - `sqlglot` 校验只读 AST、危险函数、敏感值探索和行数上限。
+- `run_sql` 不再接受任意 SQL，只能执行 `plan_query` 签发且绑定语义模型指纹的 `prepared_query_id`。
 - 只读执行通过内存库 `ATTACH` 业务库并开启 `PRAGMA query_only = ON` 完成，单条语句带执行超时。
 - `DISTINCT` 值级探索仅允许低基数字段（地区、获客渠道、订单渠道、订单状态、品类、支付方式）；客户姓名、地址、电话、邮箱等敏感字段禁止。
 - 历史查询轨迹只保存 SQL、列名、行数和最多 20 行预览。
 
 ## 代码检查
 
-项目按产品决策不包含自动化测试。可运行：
+后端行为测试覆盖语义模型、受控查询、分析运行状态机、动态计划、步骤完成条件、SSE 恢复和失败重试。运行：
 
 ```bash
+npm test
 npm run lint
 npm run typecheck
 npm run build
@@ -149,7 +164,10 @@ npm run build
 1. 新建会话，确认列表立即出现“新会话”。
 2. 发送第一条消息，确认标题更新为清理空白后的前 6 个字符。
 3. 连续追问，确认 Agent 能引用同一会话的上下文。
-4. 请求数据分析与图表，确认回答、查询预览和 Plotly 图表可见。
-5. 刷新页面并打开历史会话，确认最终消息、查询和图表恢复。
-6. 永久删除会话，确认列表、历史消息和 Agent checkpoint 均不可恢复。
-7. 尝试写入 SQL 或访问非白名单表，确认工具拒绝执行。
+4. 请求复杂数据分析，确认计划先出现、同一时间只有一步进行中、完成步骤被划去。
+5. 刷新页面或断开网络后重新打开会话，确认计划、步骤和当前进度恢复。
+6. 让某一步失败，确认错误留在对应步骤且可单独重试，已完成步骤不被改写。
+7. 请求数据分析与图表，确认回答、查询预览和 Plotly 图表可见。
+8. 刷新页面并打开历史会话，确认最终消息、查询和图表恢复。
+9. 永久删除会话，确认列表、分析运行、事件和 Agent checkpoint 均不可恢复。
+10. 尝试写入 SQL、伪造 `prepared_query_id` 或访问非白名单表，确认工具拒绝执行。

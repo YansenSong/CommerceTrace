@@ -1,4 +1,5 @@
 import type {
+  AnalysisRun,
   ApiError,
   ChatResponse,
   ConversationCreate,
@@ -56,6 +57,34 @@ export function sendMessage(
   return request(`/api/conversations/${conversationId}/messages`, {
     method: 'POST',
     body: JSON.stringify({ message }),
+  })
+}
+
+export function createAnalysisRun(
+  conversationId: string,
+  message: string,
+): Promise<AnalysisRun> {
+  return request(`/api/conversations/${conversationId}/analysis-runs`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+}
+
+export function getAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return request(`/api/analysis-runs/${runId}`)
+}
+
+export function retryAnalysisRun(runId: string): Promise<AnalysisRun> {
+  return request(`/api/analysis-runs/${runId}/retry`, { method: 'POST' })
+}
+
+export function getLatestAnalysisRun(conversationId: string): Promise<AnalysisRun> {
+  return request(`/api/conversations/${conversationId}/analysis-runs/latest`)
+}
+
+export function openAnalysisEventStream(runId: string): EventSource {
+  return new EventSource(`${API_BASE}/api/analysis-runs/${runId}/events`, {
+    withCredentials: true,
   })
 }
 

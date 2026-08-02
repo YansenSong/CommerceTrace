@@ -21,6 +21,21 @@ class QueryTrace(BaseModel):
     truncated: bool = False
 
 
+class PreparedQuery(BaseModel):
+    prepared_query_id: str
+    purpose: str
+    normalized_sql: str
+    plan: list[str] = Field(default_factory=list)
+    full_scan_tables: list[str] = Field(default_factory=list)
+    semantic_fingerprint: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class QueryResult(BaseModel):
+    trace: QueryTrace
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class Chart(BaseModel):
     chart_id: str
     source_query_id: str

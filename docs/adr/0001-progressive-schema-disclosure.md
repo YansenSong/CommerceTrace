@@ -1,8 +1,9 @@
 # 渐进披露 Schema 替代全量注入
 
+- **Status**: superseded by ADR-0006
+
 业务库将从 8 张表增长到数百张，把全部 DDL 注入系统提示词既超上下文预算，也会让模型被无关表干扰。我们决定：提示词只保留紧凑目录（表名 + 一句话描述 + 关系），字段级细节由 LLM 先按目录选表、再通过 `get_schema` 按需获取，所有 Schema 用 `schema_fingerprint()` 版本化。
 
-- **Status**: accepted
 - **Considered Options**:
   - 表级 + 字段级向量 Schema RAG（DB-GPT 路线）：数百张表下最稳、答案质量最好，但需引入 embedding 模型与向量库，当前规模下收益不抵基建成本。
   - 语义层 + 最小依赖闭包（WrenAI 路线）：最彻底但需先建语义层，工作量最大。

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from ...models import Chart, QueryTrace
-from ..sql_safety import SqlSafetyPolicy
+from ...query_engine import QueryEngine
 
 
 @dataclass
@@ -18,7 +17,5 @@ class RunArtifacts:
 @dataclass
 class AgentContext:
     artifacts: RunArtifacts
-    database_path: Path
-    statement_timeout_ms: int
-    sql_policy: SqlSafetyPolicy
+    query_engine: QueryEngine
     few_shot: list[dict[str, Any]] = field(default_factory=list)

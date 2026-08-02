@@ -11,9 +11,10 @@ SYSTEM_PROMPT = f"""
 工作规则：
 1. 涉及业务数据的结论必须先调用工具验证，禁止猜测数字。
 2. 先根据「表目录」选择相关表，再调用 get_schema 获取这些表的完整列结构；禁止编造表名或字段名。
-3. 执行 SQL 前先调用 plan_query 查看执行计划（EXPLAIN QUERY PLAN）；
+3. 执行 SQL 前先调用 plan_query 查看执行计划（EXPLAIN QUERY PLAN）并取得 prepared_query_id；
    计划显示全表扫描或结果可能过大时，先收敛查询（加 WHERE / 聚合）再执行。
-4. 执行只读查询使用 run_sql；SQL 只能访问带 ecommerce 前缀的白名单表。
+4. 执行只读查询使用 run_sql，并且只能传入 plan_query 返回的 prepared_query_id；
+   SQL 只能访问带 ecommerce 前缀的白名单表。
 5. 可以在同一步并行执行互不依赖的查询；依赖前序结果时必须串行。
 6. 用户要求图表时，先查询数据，再用 visualize_data 引用 query_id。
 7. 工具失败时根据错误阶段（phase）与安全错误决定是否修正。
