@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from commerce_trace.analysis import (
-    AnalysisEvidence,
     AnalysisRunError,
     AnalysisRunMachine,
     AnalysisRunStatus,
@@ -45,20 +44,12 @@ class AnalysisRunMachineTests(unittest.TestCase):
         with self.assertRaisesRegex(AnalysisRunError, "step_already_in_progress"):
             machine.start_next_step()
 
-        evidence = AnalysisEvidence.from_query(
-            step_id=first.step_id,
-            query_id="query_1",
-            summary="7月销售额较6月下降20%",
-            facts={"june": 120, "july": 96, "change_rate": -0.2},
-        )
         machine.complete_step(
             first.step_id,
-            evidence=[evidence],
             condition_results=[
                 CompletionConditionResult(
                     condition=first.completion_conditions[0],
                     satisfied=True,
-                    evidence_ids=[evidence.evidence_id],
                     explanation="查询返回两个周期及变化率",
                 )
             ],
@@ -88,7 +79,7 @@ class AnalysisRunMachineTests(unittest.TestCase):
             list(range(1, len(machine.events) + 1)),
         )
 
-    def test_run_completes_only_after_every_step_has_actual_evidence(self) -> None:
+    def test_run_completes_only_after_every_step_meets_its_conditions(self) -> None:
         machine = AnalysisRunMachine.create(
             conversation_id="conv_1",
             user_id="user_1",
@@ -105,51 +96,35 @@ class AnalysisRunMachineTests(unittest.TestCase):
         )
         step = machine.start_next_step()
 
-        with self.assertRaisesRegex(AnalysisRunError, "step_evidence_required"):
-            machine.complete_step(step.step_id, evidence=[], condition_results=[])
+        with self.assertRaisesRegex(AnalysisRunError, "step_condition_results_invalid"):
+            machine.complete_step(step.step_id, condition_results=[])
         with self.assertRaisesRegex(AnalysisRunError, "run_not_complete"):
             machine.finish("销售额为200元")
 
-        evidence = AnalysisEvidence.from_query(
-            step_id=step.step_id,
-            query_id="query_1",
-            summary="销售额为200元",
-            facts={"revenue": 200},
-        )
         failed = machine.complete_step(
             step.step_id,
-            evidence=[evidence],
             condition_results=[
                 CompletionConditionResult(
                     condition=step.completion_conditions[0],
                     satisfied=False,
-                    evidence_ids=[],
                     explanation="查询没有使用标准销售额口径",
                 )
             ],
         )
         self.assertEqual(failed.status, AnalysisStepStatus.FAILED)
-        self.assertEqual(machine.run.evidence, [evidence])
         self.assertFalse(failed.completion_results[0].satisfied)
         self.assertIn("查询没有使用", failed.error)
 
         machine.finish_partial("已取得销售额，但口径未验证")
         retried = machine.retry_failed_step()
+        self.assertIsNone(machine.run.answer)
         machine.start_next_step()
-        corrected = AnalysisEvidence.from_query(
-            step_id=retried.step_id,
-            query_id="query_2",
-            summary="销售额为200元",
-            facts={"revenue": 200, "metric": "revenue"},
-        )
         machine.complete_step(
             retried.step_id,
-            evidence=[corrected],
             condition_results=[
                 CompletionConditionResult(
                     condition=retried.completion_conditions[0],
                     satisfied=True,
-                    evidence_ids=[corrected.evidence_id],
                     explanation="查询使用标准销售额口径并返回聚合值",
                 )
             ],
@@ -158,7 +133,6 @@ class AnalysisRunMachineTests(unittest.TestCase):
 
         self.assertEqual(machine.run.status, AnalysisRunStatus.COMPLETED)
         self.assertEqual(machine.run.answer, "销售额为200元")
-        self.assertEqual(machine.run.evidence[0].facts, {"revenue": 200})
 
     def test_step_dependencies_must_reference_prior_steps(self) -> None:
         machine = AnalysisRunMachine.create(
@@ -207,20 +181,12 @@ class AnalysisRunMachineTests(unittest.TestCase):
             ]
         )
         first = machine.start_next_step()
-        first_evidence = AnalysisEvidence.from_query(
-            step_id=first.step_id,
-            query_id="query_1",
-            summary="下降20%",
-            facts={"change_rate": -0.2},
-        )
         machine.complete_step(
             first.step_id,
-            evidence=[first_evidence],
             condition_results=[
                 CompletionConditionResult(
                     condition="取得变化率",
                     satisfied=True,
-                    evidence_ids=[first_evidence.evidence_id],
                     explanation="已取得变化率",
                 )
             ],

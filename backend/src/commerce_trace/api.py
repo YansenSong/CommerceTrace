@@ -90,6 +90,7 @@ def create_app(
                     model=configs.model,
                     api_key=configs.model_api_key,
                     base_url=configs.model_base_url,
+                    extra_body={"thinking": {"type": "disabled"}},
                     temperature=0,
                     timeout=configs.model_timeout_seconds,
                     max_retries=1,

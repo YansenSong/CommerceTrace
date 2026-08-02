@@ -64,7 +64,10 @@ class AnalysisCoordinator:
         if run_id in self._tasks:
             raise AnalysisRunError("run_already_running")
         machine = AnalysisRunMachine(run)
-        machine.retry_failed_step()
+        if run.plan is None:
+            machine.retry_planning()
+        else:
+            machine.retry_failed_step()
         await self._store.save(machine)
         workflow = AnalysisWorkflow(
             agent=self._agent_factory(f"{user_id}:{run.conversation_id}"),

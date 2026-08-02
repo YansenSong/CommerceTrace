@@ -20,7 +20,7 @@ class Config(BaseSettings):
     knowledge_dir: Path = Path("knowledge/sql")
     model_base_url: str = "https://api.deepseek.com"
     model_api_key: SecretStr | None = None
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     cookie_name: str = "commerce_trace_user"
     cookie_secure: bool = False
     statement_timeout_ms: int = 5_000

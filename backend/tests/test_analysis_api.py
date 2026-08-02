@@ -4,12 +4,12 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from commerce_trace.analysis import (
-    AnalysisEvidence,
     AnalysisStep,
     AnalysisStepDraft,
     CompletionConditionResult,
@@ -17,13 +17,18 @@ from commerce_trace.analysis import (
 from commerce_trace.analysis.workflow import PlanRevision, StepExecution
 from commerce_trace.api import create_app
 from commerce_trace.config import Config
+from commerce_trace.models import QueryTrace
 
 
 class ApiAnalysisAgent:
     def __init__(self) -> None:
         self.fail_once = False
+        self.plan_fail_once = False
 
     async def plan(self, question: str) -> list[AnalysisStepDraft]:
+        if self.plan_fail_once:
+            self.plan_fail_once = False
+            raise RuntimeError("planning provider rejected the request")
         return [
             AnalysisStepDraft(
                 title="计算销售额",
@@ -37,24 +42,24 @@ class ApiAnalysisAgent:
         *,
         question: str,
         step: AnalysisStep,
-        prior_evidence: list[AnalysisEvidence],
+        prior_queries: list[QueryTrace],
     ) -> StepExecution:
-        evidence = AnalysisEvidence.from_query(
-            step_id=step.step_id,
+        query = QueryTrace(
             query_id="query_1",
-            summary="销售额为200元",
-            facts={"revenue": 200},
+            purpose="计算销售额",
+            sql="SELECT 200 AS revenue",
+            columns=["revenue"],
+            row_count=1,
+            preview=[{"revenue": 200}],
         )
         satisfied = not self.fail_once
         self.fail_once = False
         return StepExecution(
-            summary="销售额为200元",
-            evidence=[evidence],
+            queries=[query],
             condition_results=[
                 CompletionConditionResult(
                     condition=step.completion_conditions[0],
                     satisfied=satisfied,
-                    evidence_ids=[evidence.evidence_id] if satisfied else [],
                     explanation=(
                         "标准口径查询返回销售额"
                         if satisfied
@@ -70,7 +75,7 @@ class ApiAnalysisAgent:
         question: str,
         completed_step: AnalysisStep,
         pending_steps: list[AnalysisStep],
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
         revisions_remaining: int,
     ) -> PlanRevision | None:
         return None
@@ -79,7 +84,7 @@ class ApiAnalysisAgent:
         self,
         *,
         question: str,
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
     ) -> str:
         return "销售额为200元。"
 
@@ -133,7 +138,9 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(run["status"], "completed")
         self.assertEqual(run["answer"], "销售额为200元。")
         self.assertEqual(run["plan"]["steps"][0]["status"], "completed")
-        self.assertEqual(run["evidence"][0]["facts"], {"revenue": 200})
+        self.assertNotIn("evidence", run)
+        self.assertNotIn("evidence_ids", run["plan"]["steps"][0])
+        self.assertEqual(run["queries"][0]["preview"], [{"revenue": 200}])
 
         events = self.client.get(f"/api/analysis-runs/{run_id}/events")
         self.assertEqual(events.status_code, 200)
@@ -153,7 +160,7 @@ class AnalysisApiTests(unittest.TestCase):
 
         failed = self._wait_for_status(run_id, "partial")
         self.assertEqual(failed["plan"]["steps"][0]["status"], "failed")
-        self.assertEqual(failed["evidence"][0]["facts"], {"revenue": 200})
+        self.assertEqual(failed["queries"][0]["preview"], [{"revenue": 200}])
 
         deadline = time.monotonic() + 2
         retry_response = self.client.post(f"/api/analysis-runs/{run_id}/retry")
@@ -164,6 +171,30 @@ class AnalysisApiTests(unittest.TestCase):
 
         completed = self._wait_for_status(run_id, "completed")
         self.assertEqual(completed["answer"], "销售额为200元。")
+        events = self.client.get(f"/api/analysis-runs/{run_id}/events").text
+        self.assertIn("event: run_retried", events)
+
+    def test_planning_failure_can_retry_before_a_plan_exists(self) -> None:
+        self.analysis_agent.plan_fail_once = True
+        conversation = self.client.post("/api/conversations").json()
+        created = self.client.post(
+            f"/api/conversations/{conversation['conversation_id']}/analysis-runs",
+            json={"message": "销售额是多少？"},
+        ).json()
+        run_id = created["run_id"]
+
+        failed = self._wait_for_status(run_id, "failed")
+        self.assertIsNone(failed["plan"])
+
+        deadline = time.monotonic() + 2
+        retry_response = self.client.post(f"/api/analysis-runs/{run_id}/retry")
+        while retry_response.status_code == 409 and time.monotonic() < deadline:
+            time.sleep(0.01)
+            retry_response = self.client.post(f"/api/analysis-runs/{run_id}/retry")
+        self.assertEqual(retry_response.status_code, 202)
+
+        completed = self._wait_for_status(run_id, "completed")
+        self.assertEqual(completed["plan"]["steps"][0]["status"], "completed")
         events = self.client.get(f"/api/analysis-runs/{run_id}/events").text
         self.assertIn("event: run_retried", events)
 
@@ -178,6 +209,38 @@ class AnalysisApiTests(unittest.TestCase):
                 return run
             time.sleep(0.01)
         self.fail(f"analysis run did not reach {expected}: {run}")
+
+
+class DeepSeekConfigurationTests(unittest.TestCase):
+    @patch("commerce_trace.api.Agent")
+    @patch("commerce_trace.api.ChatDeepSeek")
+    def test_thinking_is_disabled_for_structured_agent_workflows(
+        self,
+        chat_model: object,
+        _agent: object,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config = Config(
+                database_path=root / "business.db",
+                agent_state_path=root / "state.db",
+                knowledge_dir=root / "knowledge",
+                model_api_key=SecretStr("test-key"),
+                model="deepseek-v4-flash",
+            )
+            with TestClient(
+                create_app(
+                    config,
+                    analysis_agent_factory=lambda _thread_id: ApiAnalysisAgent(),
+                )
+            ):
+                pass
+
+        call = chat_model.call_args  # type: ignore[attr-defined]
+        self.assertEqual(
+            call.kwargs["extra_body"],
+            {"thinking": {"type": "disabled"}},
+        )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from ..models import Chart, QueryTrace, Usage
 from .models import (
-    AnalysisEvidence,
     AnalysisStep,
     AnalysisStepDraft,
     AnalysisStepStatus,
@@ -17,8 +16,6 @@ from .state_machine import AnalysisRunError, AnalysisRunMachine
 
 
 class StepExecution(BaseModel):
-    summary: str
-    evidence: list[AnalysisEvidence] = Field(default_factory=list)
     condition_results: list[CompletionConditionResult] = Field(default_factory=list)
     queries: list[QueryTrace] = Field(default_factory=list)
     charts: list[Chart] = Field(default_factory=list)
@@ -38,7 +35,7 @@ class AnalysisAgent(Protocol):
         *,
         question: str,
         step: AnalysisStep,
-        prior_evidence: list[AnalysisEvidence],
+        prior_queries: list[QueryTrace],
     ) -> StepExecution: ...
 
     async def review_plan(
@@ -47,7 +44,7 @@ class AnalysisAgent(Protocol):
         question: str,
         completed_step: AnalysisStep,
         pending_steps: list[AnalysisStep],
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
         revisions_remaining: int,
     ) -> PlanRevision | None: ...
 
@@ -55,7 +52,7 @@ class AnalysisAgent(Protocol):
         self,
         *,
         question: str,
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
     ) -> str: ...
 
 
@@ -84,7 +81,7 @@ class AnalysisWorkflow:
                 execution = await self._agent.execute_step(
                     question=machine.run.question,
                     step=step,
-                    prior_evidence=list(machine.run.evidence),
+                    prior_queries=list(machine.run.queries),
                 )
                 machine.record_step_artifacts(
                     step.step_id,
@@ -94,7 +91,6 @@ class AnalysisWorkflow:
                 )
                 completed_step = machine.complete_step(
                     step.step_id,
-                    evidence=execution.evidence,
                     condition_results=execution.condition_results,
                 )
                 await self._persist(machine)
@@ -102,7 +98,7 @@ class AnalysisWorkflow:
                 if completed_step.status == AnalysisStepStatus.FAILED:
                     answer = await self._agent.synthesize(
                         question=machine.run.question,
-                        evidence=list(machine.run.evidence),
+                        queries=list(machine.run.queries),
                     )
                     machine.finish_partial(answer)
                     await self._persist(machine)
@@ -117,7 +113,7 @@ class AnalysisWorkflow:
                         question=machine.run.question,
                         completed_step=step,
                         pending_steps=pending,
-                        evidence=list(machine.run.evidence),
+                        queries=list(machine.run.queries),
                         revisions_remaining=revisions_remaining,
                     )
                     if revision is not None:
@@ -129,7 +125,7 @@ class AnalysisWorkflow:
 
             answer = await self._agent.synthesize(
                 question=machine.run.question,
-                evidence=list(machine.run.evidence),
+                queries=list(machine.run.queries),
             )
             machine.finish(answer)
             await self._persist(machine)
@@ -140,9 +136,7 @@ class AnalysisWorkflow:
             machine.fail_run(str(exc))
             await self._persist(machine)
             if isinstance(exc, AnalysisRunError) and str(exc) in {
-                "step_evidence_required",
                 "step_condition_results_invalid",
-                "step_condition_evidence_invalid",
             }:
                 return
             raise

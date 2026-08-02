@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from commerce_trace.analysis import (
-    AnalysisEvidence,
     AnalysisRunMachine,
     AnalysisRunStatus,
     AnalysisStep,
@@ -42,23 +41,23 @@ class FakeAnalysisAgent:
         *,
         question: str,
         step: AnalysisStep,
-        prior_evidence: list[AnalysisEvidence],
+        prior_queries: list[QueryTrace],
     ) -> StepExecution:
         self.executed.append(step.title)
-        evidence = AnalysisEvidence.from_query(
-            step_id=step.step_id,
+        query = QueryTrace(
             query_id=f"query_{len(self.executed)}",
-            summary=f"{step.title}得到事实",
-            facts={"value": len(self.executed)},
+            purpose=step.objective,
+            sql=f"SELECT {len(self.executed)} AS value",
+            columns=["value"],
+            row_count=1,
+            preview=[{"value": len(self.executed)}],
         )
         return StepExecution(
-            summary=f"{step.title}已完成",
-            evidence=[evidence],
+            queries=[query],
             condition_results=[
                 CompletionConditionResult(
                     condition=condition,
                     satisfied=True,
-                    evidence_ids=[evidence.evidence_id],
                     explanation="查询结果满足数据需求",
                 )
                 for condition in step.completion_conditions
@@ -71,7 +70,7 @@ class FakeAnalysisAgent:
         question: str,
         completed_step: AnalysisStep,
         pending_steps: list[AnalysisStep],
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
         revisions_remaining: int,
     ) -> PlanRevision | None:
         if self.reviewed:
@@ -92,9 +91,9 @@ class FakeAnalysisAgent:
         self,
         *,
         question: str,
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
     ) -> str:
-        return f"基于{len(evidence)}条证据完成分析"
+        return f"基于{len(queries)}条查询完成分析"
 
 
 class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -117,7 +116,7 @@ class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(machine.run.status, AnalysisRunStatus.COMPLETED)
         self.assertEqual(agent.executed, ["核实变化", "拆解品类"])
         self.assertEqual(machine.run.plan.revision, 2)
-        self.assertEqual(machine.run.answer, "基于2条证据完成分析")
+        self.assertEqual(machine.run.answer, "基于2条查询完成分析")
         self.assertEqual(persisted_sequences, list(range(1, len(persisted_sequences) + 1)))
 
     async def test_unmet_completion_condition_finishes_partial_with_facts(self) -> None:
@@ -131,15 +130,7 @@ class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
         async def unsatisfied_execute(**kwargs: object) -> StepExecution:
             step = kwargs["step"]
             assert isinstance(step, AnalysisStep)
-            evidence = AnalysisEvidence.from_query(
-                step_id=step.step_id,
-                query_id="query_partial",
-                summary="只取得当期销售额",
-                facts={"current_revenue": 96},
-            )
             return StepExecution(
-                summary="对比周期数据不足",
-                evidence=[evidence],
                 queries=[
                     QueryTrace(
                         query_id="query_partial",
@@ -157,7 +148,6 @@ class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     CompletionConditionResult(
                         condition=step.completion_conditions[0],
                         satisfied=False,
-                        evidence_ids=[evidence.evidence_id],
                         explanation="缺少上一周期销售额",
                     )
                 ],
@@ -172,7 +162,10 @@ class AnalysisWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(machine.run.status, AnalysisRunStatus.PARTIAL)
         self.assertEqual(machine.run.plan.steps[0].status, "failed")
-        self.assertEqual(machine.run.evidence[0].facts, {"current_revenue": 96})
+        self.assertEqual(
+            machine.run.queries[0].preview,
+            [{"current_revenue": 96}],
+        )
         self.assertEqual(machine.run.queries[0].plan, ["SCAN CONSTANT ROW"])
         self.assertIn("缺少上一周期", machine.run.plan.steps[0].error)
 

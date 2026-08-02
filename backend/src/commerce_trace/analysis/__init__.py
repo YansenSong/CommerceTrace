@@ -4,7 +4,6 @@ from .coordinator import AnalysisAgentFactory, AnalysisCoordinator
 from .models import (
     AnalysisEvent,
     AnalysisEventType,
-    AnalysisEvidence,
     AnalysisPlan,
     AnalysisRun,
     AnalysisRunStatus,
@@ -20,7 +19,6 @@ __all__ = [
     "AnalysisEventType",
     "AnalysisAgentFactory",
     "AnalysisCoordinator",
-    "AnalysisEvidence",
     "AnalysisPlan",
     "AnalysisRun",
     "AnalysisRunError",

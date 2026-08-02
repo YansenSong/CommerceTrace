@@ -49,11 +49,9 @@ export interface AnalysisStep {
   objective: string
   completion_conditions: string[]
   status: AnalysisStepStatus
-  evidence_ids: string[]
   completion_results: Array<{
     condition: string
     satisfied: boolean
-    evidence_ids: string[]
     explanation: string
   }>
   error?: string | null
@@ -65,22 +63,12 @@ export interface AnalysisPlan {
   steps: AnalysisStep[]
 }
 
-export interface AnalysisEvidence {
-  evidence_id: string
-  step_id: string
-  query_id: string
-  summary: string
-  facts: Record<string, unknown>
-  created_at: string
-}
-
 export interface AnalysisRun {
   run_id: string
   conversation_id: string
   question: string
   status: AnalysisRunStatus
   plan?: AnalysisPlan | null
-  evidence: AnalysisEvidence[]
   queries: QueryTrace[]
   charts: Chart[]
   answer?: string | null

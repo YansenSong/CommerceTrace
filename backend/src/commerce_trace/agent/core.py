@@ -13,7 +13,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, Field
 
 from ..analysis import (
-    AnalysisEvidence,
     AnalysisStep,
     AnalysisStepDraft,
     CompletionConditionResult,
@@ -21,7 +20,7 @@ from ..analysis import (
 from ..analysis.workflow import PlanRevision, StepExecution
 from ..config import Config
 from ..memory import MemoryStore
-from ..models import ChatResponse, Usage
+from ..models import ChatResponse, QueryTrace, Usage
 from ..query_engine import QueryEngine
 from ..semantic import COMMERCE_SEMANTIC_MODEL
 from .memory_middleware import FewShotMemoryMiddleware
@@ -180,7 +179,7 @@ class AnalysisAgentSession:
         *,
         question: str,
         step: AnalysisStep,
-        prior_evidence: list[AnalysisEvidence],
+        prior_queries: list[QueryTrace],
     ) -> StepExecution:
         artifacts = RunArtifacts()
         usage_callback = UsageMetadataCallbackHandler()
@@ -197,11 +196,11 @@ class AnalysisAgentSession:
             "步骤完成条件：\n- "
             + "\n- ".join(step.completion_conditions)
             + "\n\n已取得的事实：\n"
-            + _evidence_context(prior_evidence)
+            + _query_context(prior_queries)
             + "\n\n只执行当前步骤。必须先取得 Schema，再准备并执行查询。"
             "没有实际查询结果时不得声称步骤完成。"
         )
-        result = await self._owner._agent.ainvoke(
+        await self._owner._agent.ainvoke(
             {"messages": [{"role": "user", "content": prompt}]},
             config={
                 "configurable": {"thread_id": self._thread_id},
@@ -213,45 +212,27 @@ class AnalysisAgentSession:
                 few_shot=few_shot,
             ),
         )
-        summary = _last_answer(result.get("messages", []))
-        evidence = [
-            AnalysisEvidence.from_query(
-                step_id=step.step_id,
-                query_id=query.query_id,
-                summary=summary,
-                facts={
-                    "columns": query.columns,
-                    "row_count": query.row_count,
-                    "rows": query.preview,
-                    "truncated": query.truncated,
-                },
-            )
-            for query in artifacts.queries
-        ]
         condition_results: list[CompletionConditionResult] = []
-        if evidence:
+        if artifacts.queries:
             assessor = self._owner._model.with_structured_output(_StepAssessment)
             assessment = await assessor.ainvoke(
                 [
                     SystemMessage(
                         content=(
                             "逐条判断步骤完成条件是否被实际数据事实满足。"
-                            "condition 必须原样返回；satisfied 只能依据给出的事实；"
-                            "evidence_ids 必须引用给出的证据 ID。"
+                            "condition 必须原样返回；satisfied 只能依据给出的查询结果。"
                         )
                     ),
                     HumanMessage(
                         content=(
                             f"完成条件：{step.completion_conditions}\n"
-                            f"实际事实：{_evidence_context(evidence)}"
+                            f"实际查询结果：{_query_context(artifacts.queries)}"
                         )
                     ),
                 ]
             )
             condition_results = _StepAssessment.model_validate(assessment).results
         return StepExecution(
-            summary=summary,
-            evidence=evidence,
             condition_results=condition_results,
             queries=artifacts.queries,
             charts=artifacts.charts,
@@ -264,7 +245,7 @@ class AnalysisAgentSession:
         question: str,
         completed_step: AnalysisStep,
         pending_steps: list[AnalysisStep],
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
         revisions_remaining: int,
     ) -> PlanRevision | None:
         reviewer = self._owner._model.with_structured_output(_PlanReview)
@@ -283,7 +264,7 @@ class AnalysisAgentSession:
                         f"刚完成：{completed_step.title}\n"
                         f"剩余修订预算：{revisions_remaining}\n"
                         f"当前待执行步骤：{[step.model_dump() for step in pending_steps]}\n"
-                        f"实际事实：{_evidence_context(evidence)}"
+                        f"实际查询结果：{_query_context(queries)}"
                     )
                 ),
             ]
@@ -297,7 +278,7 @@ class AnalysisAgentSession:
         self,
         *,
         question: str,
-        evidence: list[AnalysisEvidence],
+        queries: list[QueryTrace],
     ) -> str:
         response = await self._owner._model.ainvoke(
             [
@@ -308,7 +289,7 @@ class AnalysisAgentSession:
                     )
                 ),
                 HumanMessage(
-                    content=f"问题：{question}\n\n实际数据事实：\n{_evidence_context(evidence)}"
+                    content=f"问题：{question}\n\n实际查询结果：\n{_query_context(queries)}"
                 ),
             ]
         )
@@ -341,12 +322,16 @@ def _usage(metadata: Mapping[str, Mapping[str, Any]]) -> Usage:
     return Usage(input_tokens=input_tokens, output_tokens=output_tokens)
 
 
-def _evidence_context(evidence: list[AnalysisEvidence]) -> str:
-    if not evidence:
+def _query_context(queries: list[QueryTrace]) -> str:
+    if not queries:
         return "（暂无）"
     return "\n".join(
-        f"- {item.summary}；query_id={item.query_id}；facts={item.facts}"
-        for item in evidence
+        (
+            f"- query_id={item.query_id}；purpose={item.purpose}；"
+            f"columns={item.columns}；row_count={item.row_count}；"
+            f"rows={item.preview}；truncated={item.truncated}"
+        )
+        for item in queries
     )
 
 

@@ -137,20 +137,13 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 }
 
 function renderInline(text: string) {
-  const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`|\[?ev_[A-Za-z0-9_-]+\]?)/g
+  const tokenPattern = /(\*\*[^*]+\*\*|`[^`]+`)/g
   return text.split(tokenPattern).map((part, index) => {
     if (/^\*\*[^*]+\*\*$/.test(part)) {
       return <strong key={`strong-${index}`}>{part.slice(2, -2)}</strong>
     }
     if (/^`[^`]+`$/.test(part)) {
       return <code className="inline-code" key={`code-${index}`}>{part.slice(1, -1)}</code>
-    }
-    if (/^\[?ev_[A-Za-z0-9_-]+\]?$/.test(part)) {
-      return (
-        <code className="evidence-reference" key={`evidence-${index}`}>
-          {part.replace(/^\[/, '').replace(/\]$/, '')}
-        </code>
-      )
     }
     return part
   })
@@ -365,16 +358,16 @@ export function AssistantContent({ content }: { content: string }) {
     lines = lines.filter((line) => !sectionMarker(line, '结论'))
   }
 
-  const evidenceIndex = lines.findIndex((line) => sectionMarker(line, '证据'))
+  const basisIndex = lines.findIndex((line) => sectionMarker(line, '数据依据'))
   const methodIndex = lines.findIndex(
-    (line, index) => index > evidenceIndex && /^口径说明[：:]/.test(line.trim()),
+    (line, index) => index > basisIndex && /^口径说明[：:]/.test(line.trim()),
   )
   const answerEnd =
-    evidenceIndex >= 0 ? evidenceIndex : methodIndex >= 0 ? methodIndex : lines.length
+    basisIndex >= 0 ? basisIndex : methodIndex >= 0 ? methodIndex : lines.length
   const answerLines = lines.slice(0, answerEnd)
-  const evidenceLines =
-    evidenceIndex >= 0
-      ? lines.slice(evidenceIndex + 1, methodIndex >= 0 ? methodIndex : lines.length)
+  const basisLines =
+    basisIndex >= 0
+      ? lines.slice(basisIndex + 1, methodIndex >= 0 ? methodIndex : lines.length)
       : []
   const methodText =
     methodIndex >= 0 ? lines[methodIndex].trim().replace(/^口径说明[：:]\s*/, '') : ''
@@ -390,10 +383,10 @@ export function AssistantContent({ content }: { content: string }) {
         <MarkdownBlocks lines={answerLines} />
       )}
 
-      {evidenceLines.some((line) => line.trim()) && (
-        <section className="answer-evidence">
-          <h3 className="answer-section-title">支撑证据</h3>
-          <MarkdownBlocks lines={evidenceLines} />
+      {basisLines.some((line) => line.trim()) && (
+        <section className="answer-basis">
+          <h3 className="answer-section-title">数据依据</h3>
+          <MarkdownBlocks lines={basisLines} />
         </section>
       )}
 
@@ -407,7 +400,7 @@ export function AssistantContent({ content }: { content: string }) {
   )
 }
 
-function EvidenceTable({ rows }: { rows: Array<Record<string, unknown>> }) {
+function QueryResultTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   if (!rows.length) {
     return (
       <div className="empty-table">
@@ -435,33 +428,33 @@ function EvidenceTable({ rows }: { rows: Array<Record<string, unknown>> }) {
   )
 }
 
-function EvidenceSection({
-  evidence,
+function QueryResultSection({
+  queries,
   headingId,
 }: {
-  evidence: QueryTrace[]
+  queries: QueryTrace[]
   headingId: string
 }) {
-  if (!evidence.length) return null
+  if (!queries.length) return null
 
   return (
-    <section className="evidence-section" aria-labelledby={headingId}>
+    <section className="query-section" aria-labelledby={headingId}>
       <div className="section-heading">
         <div>
           <span className="section-icon"><Icon name="database" size={18} /></span>
           <div>
-            <h2 id={headingId}>查询证据</h2>
-            <p>{evidence.length} 条已执行查询，可展开核验</p>
+            <h2 id={headingId}>查询结果</h2>
+            <p>{queries.length} 条已执行查询，可展开查看</p>
           </div>
         </div>
-        <span className="verified-badge">已验证</span>
+        <span className="verified-badge">已执行</span>
       </div>
 
-      <div className="evidence-list">
-        {evidence.map((item) => (
-          <details className="evidence-card" key={item.query_id}>
+      <div className="query-list">
+        {queries.map((item) => (
+          <details className="query-card" key={item.query_id}>
             <summary>
-              <div className="evidence-summary">
+              <div className="query-summary">
                 <code>{item.query_id}</code>
                 <strong>{item.purpose}</strong>
                 <span>
@@ -472,8 +465,8 @@ function EvidenceSection({
               </div>
               <span className="detail-chevron"><Icon name="chevron" size={18} /></span>
             </summary>
-            <div className="evidence-detail">
-              <EvidenceTable rows={item.preview} />
+            <div className="query-detail">
+              <QueryResultTable rows={item.preview} />
               <details className="sql">
                 <summary>
                   <span>查看只读 SQL</span>
@@ -481,7 +474,7 @@ function EvidenceSection({
                 </summary>
                 <pre><code>{item.sql}</code></pre>
               </details>
-              <div className="evidence-meta">
+              <div className="query-meta">
                 <span>{item.columns.length} 个字段</span>
                 <span>仅保存前 20 行预览</span>
               </div>
@@ -549,7 +542,23 @@ function AnalysisPlanStatus({
   run: AnalysisRun
   onRetry: () => void
 }) {
-  if (!run.plan) return null
+  if (!run.plan) {
+    if (run.status !== 'failed') return null
+    return (
+      <section className="analysis-plan-card" aria-label="分析计划">
+        <div className="analysis-plan-heading">
+          <div>
+            <span>ANALYSIS PLAN</span>
+            <h2>分析计划生成失败</h2>
+          </div>
+        </div>
+        <p className="plan-revision">尚未执行任何数据查询，可重新生成计划。</p>
+        <button className="plan-retry" type="button" onClick={onRetry}>
+          重新生成分析计划
+        </button>
+      </section>
+    )
+  }
   return (
     <section className="analysis-plan-card" aria-label="分析计划">
       <div className="analysis-plan-heading">
@@ -986,11 +995,11 @@ export default function App() {
                 <div className="hero-symbol" aria-hidden="true">
                   <Icon name="spark" size={26} />
                 </div>
-                <p className="overline">EVIDENCE-FIRST ANALYTICS</p>
+                <p className="overline">TRACEABLE ANALYTICS</p>
                 <h2>从经营问题出发，<br />让数据给出答案。</h2>
                 <p className="hero-copy">
                   用自然语言询问订单、销售额和经营趋势。商迹会执行只读查询，
-                  并为每个结论保留可核验的证据。
+                  并保留可查看的查询结果和 SQL。
                 </p>
                 <div className="suggestions" aria-label="推荐问题">
                   {suggestions.map((suggestion) => (
@@ -1005,11 +1014,11 @@ export default function App() {
 
             <div className="message-list">
               {state.messages.map((message) => {
-                const replyEvidence =
+                const replyQueries =
                   message.role === 'assistant' ? message.queries : []
                 const replyCharts =
                   message.role === 'assistant' ? message.charts : []
-                const headingId = `evidence-${message.message_id}`
+                const headingId = `queries-${message.message_id}`
 
                 return (
                   <article key={message.message_id} className={`message ${message.role}`}>
@@ -1027,9 +1036,9 @@ export default function App() {
                       )}
                     </div>
                     {message.role === 'assistant' &&
-                      (replyEvidence.length > 0 || replyCharts.length > 0) && (
+                      (replyQueries.length > 0 || replyCharts.length > 0) && (
                         <div className="message-artifacts">
-                          <EvidenceSection evidence={replyEvidence} headingId={headingId} />
+                          <QueryResultSection queries={replyQueries} headingId={headingId} />
                           <Suspense
                             fallback={<div className="chart-skeleton">正在准备可视化…</div>}
                           >
@@ -1039,7 +1048,7 @@ export default function App() {
                           </Suspense>
                         </div>
                       )}
-                    {message.role === 'assistant' && replyEvidence.length > 0 && (
+                    {message.role === 'assistant' && replyQueries.length > 0 && (
                       <div className="confirm-row">
                         <button
                           type="button"
@@ -1109,7 +1118,7 @@ export default function App() {
           </form>
           <p className="composer-hint">
             <span>Enter 发送 · Shift + Enter 换行</span>
-            <span>答案由查询结果生成，请以证据为准</span>
+            <span>答案由查询结果生成，可展开查看 SQL</span>
           </p>
         </div>
       </main>

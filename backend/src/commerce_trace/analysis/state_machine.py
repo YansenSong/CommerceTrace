@@ -6,7 +6,6 @@ from ..models import Chart, QueryTrace, Usage, utc_now
 from .models import (
     AnalysisEvent,
     AnalysisEventType,
-    AnalysisEvidence,
     AnalysisPlan,
     AnalysisRun,
     AnalysisRunStatus,
@@ -144,39 +143,18 @@ class AnalysisRunMachine:
         self,
         step_id: str,
         *,
-        evidence: list[AnalysisEvidence],
         condition_results: list[CompletionConditionResult],
     ) -> AnalysisStep:
-        if not evidence:
-            raise AnalysisRunError("step_evidence_required")
         step = self._step(step_id)
         if step.status != AnalysisStepStatus.IN_PROGRESS:
             raise AnalysisRunError("step_not_in_progress")
-        if any(item.step_id != step_id for item in evidence):
-            raise AnalysisRunError("evidence_step_mismatch")
         if (
             len(condition_results) != len(step.completion_conditions)
             or {item.condition for item in condition_results}
             != set(step.completion_conditions)
         ):
             raise AnalysisRunError("step_condition_results_invalid")
-        evidence_ids = {item.evidence_id for item in evidence}
-        if any(
-            (item.satisfied and not item.evidence_ids)
-            or not set(item.evidence_ids).issubset(evidence_ids)
-            for item in condition_results
-        ):
-            raise AnalysisRunError("step_condition_evidence_invalid")
-        step.evidence_ids.extend(
-            item.evidence_id
-            for item in evidence
-            if item.evidence_id not in step.evidence_ids
-        )
         step.completion_results = condition_results
-        known_evidence = {item.evidence_id for item in self.run.evidence}
-        self.run.evidence.extend(
-            item for item in evidence if item.evidence_id not in known_evidence
-        )
         unmet = [item for item in condition_results if not item.satisfied]
         if unmet:
             step.status = AnalysisStepStatus.FAILED
@@ -186,7 +164,6 @@ class AnalysisRunMachine:
                 AnalysisEventType.STEP_FAILED,
                 {
                     "step": step.model_dump(mode="json"),
-                    "evidence": [item.model_dump(mode="json") for item in evidence],
                     "completion_results": [
                         item.model_dump(mode="json") for item in condition_results
                     ],
@@ -200,7 +177,6 @@ class AnalysisRunMachine:
             AnalysisEventType.STEP_COMPLETED,
             {
                 "step": step.model_dump(mode="json"),
-                "evidence": [item.model_dump(mode="json") for item in evidence],
                 "completion_results": [
                     item.model_dump(mode="json") for item in condition_results
                 ],
@@ -307,16 +283,30 @@ class AnalysisRunMachine:
             raise AnalysisRunError("failed_step_not_found")
         failed.status = AnalysisStepStatus.PENDING
         failed.error = None
-        failed.evidence_ids = []
         failed.completion_results = []
         self.run.status = AnalysisRunStatus.RUNNING
         self.run.error = None
+        self.run.answer = None
         self._touch()
         self._emit(
             AnalysisEventType.RUN_RETRIED,
             {"step": failed.model_dump(mode="json"), "status": self.run.status},
         )
         return failed
+
+    def retry_planning(self) -> None:
+        """Reset a run that failed before its initial plan was published."""
+
+        if self.run.status != AnalysisRunStatus.FAILED or self.run.plan is not None:
+            raise AnalysisRunError("run_not_retryable")
+        self.run.status = AnalysisRunStatus.QUEUED
+        self.run.error = None
+        self.run.answer = None
+        self._touch()
+        self._emit(
+            AnalysisEventType.RUN_RETRIED,
+            {"phase": "planning", "status": self.run.status},
+        )
 
     def _plan(self) -> AnalysisPlan:
         if self.run.plan is None:

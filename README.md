@@ -12,7 +12,7 @@ FastAPI
   │    └─ AnalysisWorkflow
   │         ├─ 生成并发布可见分析计划
   │         ├─ 逐项执行、完成条件判定与受限修订
-  │         └─ 基于实际证据生成结论
+  │         └─ 基于查询结果生成结论
   ├─ LangChain create_agent + ChatDeepSeek
   │    ├─ get_schema
   │    ├─ plan_metric_query / plan_query → prepared_query_id → run_sql
@@ -20,10 +20,12 @@ FastAPI
   ├─ 版本化业务语义模型（Schema、关系、指标与治理规则）
   ├─ QueryEngine（SQL AST 校验、EXPLAIN、只读执行与幂等结果）
   ├─ LangGraph SQLite checkpointer
-  └─ 会话、分析运行、事件与证据（HttpOnly cookie + SQLite）
+  └─ 会话、分析运行、事件与查询工件（HttpOnly cookie + SQLite）
 ```
 
-DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定带前置依赖的业务分析步骤和解释结果，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行、实际证据必须逐条满足步骤完成条件。已取得事实但条件未全部满足时，运行保留查询、事实和未满足解释，以 `partial` 结束并可重试失败步骤。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
+DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定带前置依赖的业务分析步骤、解释查询结果并逐条判断完成条件，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行。查询结果未满足所有完成条件时，运行保留查询工件和未满足解释，以 `partial` 结束并可重试失败步骤。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
+
+完整的领域模型、状态转移、执行时序、查询安全门和当前能力边界见 [DataAgent 工作流设计与实现详解](docs/DataAgent工作流设计与实现详解.md)。
 
 ## 环境要求
 
@@ -43,7 +45,7 @@ npm run sync
 ```dotenv
 COMMERCE_TRACE_MODEL_API_KEY=sk-...
 COMMERCE_TRACE_MODEL_BASE_URL=https://api.deepseek.com
-COMMERCE_TRACE_MODEL=deepseek-chat
+COMMERCE_TRACE_MODEL=deepseek-v4-flash
 COMMERCE_TRACE_DATABASE_PATH=data/commerce_trace.db
 COMMERCE_TRACE_AGENT_STATE_PATH=data/agent_state.db
 ```
@@ -53,7 +55,7 @@ COMMERCE_TRACE_AGENT_STATE_PATH=data/agent_state.db
 | 变量 | 默认值 | 作用 |
 |---|---|---|
 | `COMMERCE_TRACE_MODEL_BASE_URL` | `https://api.deepseek.com` | 模型服务地址 |
-| `COMMERCE_TRACE_MODEL` | `deepseek-chat` | 模型名称 |
+| `COMMERCE_TRACE_MODEL` | `deepseek-v4-flash` | 模型名称；当前结构化 Agent 工作流显式使用非 Thinking 模式 |
 | `COMMERCE_TRACE_STATEMENT_TIMEOUT_MS` | `5000` | 单条 SQL 执行超时（毫秒） |
 | `COMMERCE_TRACE_MODEL_TIMEOUT_SECONDS` | `60` | 模型请求超时（秒） |
 | `COMMERCE_TRACE_MAX_RESULT_ROWS` | `500` | 普通查询结果行数上限 |
@@ -105,7 +107,7 @@ npm run dev
 | `POST` | `/api/conversations/{id}/messages` | 发送消息并获得最终 JSON 回答 |
 | `POST` | `/api/conversations/{id}/analysis-runs` | 创建后台分析运行，立即返回运行状态 |
 | `GET` | `/api/conversations/{id}/analysis-runs/latest` | 获取会话最近一次分析运行 |
-| `GET` | `/api/analysis-runs/{run_id}` | 获取计划、步骤、证据与最终状态 |
+| `GET` | `/api/analysis-runs/{run_id}` | 获取计划、步骤、查询工件与最终状态 |
 | `GET` | `/api/analysis-runs/{run_id}/events` | 通过 SSE 接收有序运行事件 |
 | `POST` | `/api/analysis-runs/{run_id}/retry` | 重试失败步骤，不改写已完成历史 |
 | `DELETE` | `/api/conversations/{id}` | 永久删除会话和 checkpoints |
