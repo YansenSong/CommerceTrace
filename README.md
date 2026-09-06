@@ -1,46 +1,155 @@
-# CommerceTrace
+# CommerceTrace · 商迹
 
-CommerceTrace（商迹）是一个基于 LangChain 的中文电商经营分析 Agent。用户可以用自然语言查询本地 SQLite 数据、核验 SQL 轨迹并生成 Plotly 图表。
+一个面向本地电商经营数据的 **AI 分析 Agent**。用户不需要手写 SQL，可以直接用中文提出业务问题；系统会先生成可见的分析计划，再在受控语义模型和 SQL 安全门下查询 SQLite 数据，最后返回结论、查询轨迹与 Plotly 图表。
+
+```text
+“最近 30 天销售额为什么下降？”
+“按地区比较客单价和复购率。”
+“找出退款率异常的品类，并给我画图。”
+```
+
+CommerceTrace 的重点不是“让 LLM 随意生成 SQL”，而是把模型负责的推理部分和后端必须确定执行的安全边界拆开：**模型负责计划与解释，系统负责 Schema、指标定义、SQL 准备、只读验证、执行状态和结果持久化。**
+
+## 核心能力
+
+- **自然语言数据分析**：用中文查询本地电商数据。
+- **可见分析计划**：复杂请求先展示步骤，再逐项执行。
+- **受治理业务指标**：核心指标通过版本化语义模型确定性展开，而不是每次让模型重新猜 SQL。
+- **安全 SQL 执行**：SQL AST 校验、EXPLAIN、白名单表、危险函数检查、超时与行数限制。
+- **Prepared Query**：模型不能把任意 SQL 直接交给执行器，必须先准备并签发 `prepared_query_id`。
+- **Agentic RAG / Schema Context**：模型按需获取表结构和业务语义上下文。
+- **后台分析运行**：复杂任务独立于单个 HTTP 请求运行。
+- **SSE 实时进度**：前端可查看计划、步骤和运行事件，并支持断线恢复。
+- **失败步骤重试**：保留已完成历史，只重试失败部分。
+- **会话持久化**：消息、分析运行、查询工件、图表和 LangGraph checkpoints 保存在 SQLite。
+- **图表生成**：根据查询结果生成 Plotly 可视化。
 
 ## 架构
 
 ```text
-React
-  │ REST JSON + SSE
+React Frontend
+      │
+      │ REST JSON + SSE
+      ▼
 FastAPI
-  ├─ AnalysisCoordinator（持久化后台分析运行）
-  │    └─ AnalysisWorkflow
-  │         ├─ 生成并发布可见分析计划
-  │         ├─ 逐项执行、完成条件判定与受限修订
-  │         └─ 基于查询结果生成结论
-  ├─ LangChain create_agent + ChatDeepSeek
-  │    ├─ get_schema
-  │    ├─ plan_metric_query / plan_query → prepared_query_id → run_sql
-  │    └─ visualize_data
-  ├─ 版本化业务语义模型（Schema、关系、指标与治理规则）
-  ├─ QueryEngine（SQL AST 校验、EXPLAIN、只读执行与幂等结果）
-  ├─ LangGraph SQLite checkpointer
-  └─ 会话、分析运行、事件与查询工件（HttpOnly cookie + SQLite）
+      │
+      ├─ Conversation / Session
+      │      └─ HttpOnly anonymous cookie
+      │
+      ├─ AnalysisCoordinator
+      │      └─ AnalysisWorkflow
+      │           ├─ generate plan
+      │           ├─ execute step-by-step
+      │           ├─ completion conditions
+      │           ├─ bounded revision
+      │           └─ final interpretation
+      │
+      ├─ LangChain Agent + ChatDeepSeek
+      │      ├─ get_schema
+      │      ├─ plan_metric_query
+      │      ├─ plan_query
+      │      ├─ run_sql(prepared_query_id)
+      │      └─ visualize_data
+      │
+      ├─ Versioned Semantic Model
+      │      ├─ schemas
+      │      ├─ relationships
+      │      ├─ governed metrics
+      │      └─ exploration rules
+      │
+      ├─ QueryEngine
+      │      ├─ AST validation
+      │      ├─ EXPLAIN
+      │      ├─ read-only execution
+      │      └─ idempotent results
+      │
+      └─ SQLite
+             ├─ business database
+             └─ agent/session state
 ```
 
-DataAgent 采用“单 Agent 决策 + 确定性工作流”：模型负责制定带前置依赖的业务分析步骤、解释查询结果并逐条判断完成条件，后端状态机强制计划只能逐项推进、已完成步骤不可改写、SQL 必须先准备再执行。查询结果未满足所有完成条件时，运行保留查询工件和未满足解释，以 `partial` 结束并可重试失败步骤。复杂运行独立于一次 HTTP 请求存在，浏览器可通过 SSE 查看计划进度并在断线后恢复。
+## 运行模型
 
-完整的领域模型、状态转移、执行时序、查询安全门和当前能力边界见 [DataAgent 工作流设计与实现详解](docs/DataAgent工作流设计与实现详解.md)。
+DataAgent 使用“**LLM 决策 + 确定性状态机**”的组合方式：
+
+```text
+用户问题
+  │
+  ▼
+生成分析计划
+  │
+  ▼
+逐步执行
+  │
+  ├─ 获取 Schema / 指标语义
+  ├─ 准备查询
+  ├─ 安全校验
+  ├─ 执行 SQL
+  ├─ 检查完成条件
+  └─ 必要时有限修订
+  │
+  ▼
+总结结论 + 查询轨迹 + 图表
+```
+
+计划中的已完成步骤不会被随意改写。查询结果不足以满足完成条件时，运行可以以 `partial` 状态结束，并保留未满足原因和查询工件。
+
+更完整的设计说明见：
+
+```text
+docs/DataAgent工作流设计与实现详解.md
+```
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| Frontend | React / TypeScript / Vite |
+| Backend | FastAPI / Python 3.12 |
+| Agent | LangChain / LangGraph |
+| LLM | DeepSeek OpenAI-compatible API |
+| SQL Parsing | sqlglot |
+| Business DB | SQLite |
+| Agent State | SQLite / LangGraph checkpointer |
+| Visualization | Plotly |
+| Streaming | Server-Sent Events (SSE) |
+| Python Env | uv |
 
 ## 环境要求
 
-- Python 3.12
-- [UV](https://docs.astral.sh/uv/)
-- Node.js 20+（Vite 7 要求 20.19+）
-- 模型 API key（默认使用 DeepSeek，OpenAI 兼容 Chat Completions）
+- Python **3.12**
+- [uv](https://docs.astral.sh/uv/)
+- Node.js **20+**（Vite 7 需要 20.19+）
+- npm
+- 一个可用的模型 API Key
 
-## 安装
+## 60 秒快速开始
+
+### 1. 克隆仓库
+
+```bash
+git clone <repository-url>
+cd CommerceTrace
+```
+
+### 2. 安装前后端依赖
+
+根目录已经提供统一脚本：
 
 ```bash
 npm run sync
 ```
 
-在项目根目录的 `.env` 中配置（后端固定从仓库根目录读取）：
+它会执行：
+
+```text
+backend: uv sync --extra data
+frontend: npm install
+```
+
+### 3. 配置 `.env`
+
+在仓库根目录创建 `.env`：
 
 ```dotenv
 COMMERCE_TRACE_MODEL_API_KEY=sk-...
@@ -50,69 +159,138 @@ COMMERCE_TRACE_DATABASE_PATH=data/commerce_trace.db
 COMMERCE_TRACE_AGENT_STATE_PATH=data/agent_state.db
 ```
 
-`COMMERCE_TRACE_MODEL_API_KEY` 必填，未配置时后端启动即报错。其余可选变量：
+其中：
+
+```text
+COMMERCE_TRACE_MODEL_API_KEY
+```
+
+为必填项，缺失时后端会在启动阶段报错。
+
+其他常用配置：
 
 | 变量 | 默认值 | 作用 |
 |---|---|---|
-| `COMMERCE_TRACE_MODEL_BASE_URL` | `https://api.deepseek.com` | 模型服务地址 |
-| `COMMERCE_TRACE_MODEL` | `deepseek-v4-flash` | 模型名称；当前结构化 Agent 工作流显式使用非 Thinking 模式 |
-| `COMMERCE_TRACE_STATEMENT_TIMEOUT_MS` | `5000` | 单条 SQL 执行超时（毫秒） |
-| `COMMERCE_TRACE_MODEL_TIMEOUT_SECONDS` | `60` | 模型请求超时（秒） |
-| `COMMERCE_TRACE_MAX_RESULT_ROWS` | `500` | 普通查询结果行数上限 |
-| `COMMERCE_TRACE_MAX_DISTINCT_VALUES` | `50` | 值级探索行数上限 |
-| `COMMERCE_TRACE_COOKIE_SECURE` | `false` | 会话 cookie 的 Secure 标志 |
+| `COMMERCE_TRACE_MODEL_BASE_URL` | `https://api.deepseek.com` | 模型 API 地址 |
+| `COMMERCE_TRACE_MODEL` | `deepseek-v4-flash` | 当前模型 |
+| `COMMERCE_TRACE_STATEMENT_TIMEOUT_MS` | `5000` | SQL 超时，毫秒 |
+| `COMMERCE_TRACE_MODEL_TIMEOUT_SECONDS` | `60` | 模型请求超时 |
+| `COMMERCE_TRACE_MAX_RESULT_ROWS` | `500` | 普通查询最大结果行数 |
+| `COMMERCE_TRACE_MAX_DISTINCT_VALUES` | `50` | 值级探索最大数量 |
+| `COMMERCE_TRACE_COOKIE_SECURE` | `false` | 会话 Cookie Secure 标志 |
 
-依赖由 `backend/uv.lock` 和 `frontend/package-lock.json` 锁定。当前 LangChain 核心依赖使用确切版本，不使用预览版。
-
-后端直接读取 `COMMERCE_TRACE_DATABASE_PATH` 指向的业务数据库（`data/` 不纳入版本控制）。安装依赖后运行下面的命令初始化业务库：应用 `migrations/*.sql` 并生成固定种子的示例数据。
+### 4. 初始化演示数据
 
 ```bash
 uv run --project backend commerce-trace init --profile test
 ```
 
-命令说明：
+`test` 是小规模数据集，适合开发和测试。
 
-| 命令 | 作用 |
-|---|---|
-| `commerce-trace migrate` | 仅应用 `migrations/*.sql` |
-| `commerce-trace generate-data [--profile test\|demo]` | 迁移后生成并写入示例数据 |
-| `commerce-trace init [--profile test\|demo] [--no-data] [--if-empty]` | 迁移；默认生成数据，`--no-data` 跳过，`--if-empty` 仅在无数据时生成 |
+如需较大的演示数据：
 
-`test` 为小规模配置（80 客户 / 300 订单），`demo` 为 10 万订单规模。数据生成依赖（Faker、pyyaml）随 `uv sync --extra data` 安装，运行前请先执行 `npm run sync`。
+```bash
+uv run --project backend commerce-trace init --profile demo
+```
 
-## 运行
+当前约定：
 
-分别启动后端与前端：
+- `test`：约 80 客户 / 300 订单；
+- `demo`：约 10 万订单。
+
+### 5. 启动
+
+一条命令同时启动前后端：
+
+```bash
+npm run dev
+```
+
+或分别启动：
 
 ```bash
 npm run backend
 npm run frontend
 ```
 
-或一条命令同时启动两者：
+默认地址：
+
+| 服务 | 地址 |
+|---|---|
+| Frontend | `http://localhost:5173` |
+| Backend | `http://localhost:8000` |
+
+## 数据初始化命令
+
+CLI 提供：
+
+| 命令 | 作用 |
+|---|---|
+| `commerce-trace migrate` | 应用 `migrations/*.sql` |
+| `commerce-trace generate-data --profile test` | 生成测试数据 |
+| `commerce-trace generate-data --profile demo` | 生成大规模演示数据 |
+| `commerce-trace init` | 迁移并生成数据 |
+| `commerce-trace init --no-data` | 仅迁移 |
+| `commerce-trace init --if-empty` | 仅空数据库时生成数据 |
+
+数据生成依赖随：
 
 ```bash
-npm run dev
+uv sync --extra data
 ```
 
-前端地址为 `http://localhost:5173`，后端地址为 `http://localhost:8000`。
+安装。
+
+## 典型使用
+
+### 基础查询
+
+```text
+本月总销售额是多少？
+```
+
+### 分组分析
+
+```text
+按地区比较销售额和订单数。
+```
+
+### 指标诊断
+
+```text
+最近一个月退款率上升了吗？主要是哪几个品类导致的？
+```
+
+### 可视化
+
+```text
+画出最近 12 个月销售额趋势，并标出同比变化。
+```
+
+### 多步骤问题
+
+```text
+找出最近 90 天销售额下降最多的三个品类，分别分析订单量、客单价和退款率的变化，再告诉我最可能的原因。
+```
+
+这类问题会创建后台 Analysis Run，前端可实时看到每一步的状态。
 
 ## API
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | `POST` | `/api/conversations` | 新建会话 |
-| `GET` | `/api/conversations` | 分页列出当前匿名用户的会话 |
-| `GET` | `/api/conversations/{id}/messages` | 获取历史消息与查询/图表快照 |
-| `POST` | `/api/conversations/{id}/messages` | 发送消息并获得最终 JSON 回答 |
-| `POST` | `/api/conversations/{id}/analysis-runs` | 创建后台分析运行，立即返回运行状态 |
-| `GET` | `/api/conversations/{id}/analysis-runs/latest` | 获取会话最近一次分析运行 |
-| `GET` | `/api/analysis-runs/{run_id}` | 获取计划、步骤、查询工件与最终状态 |
-| `GET` | `/api/analysis-runs/{run_id}/events` | 通过 SSE 接收有序运行事件 |
-| `POST` | `/api/analysis-runs/{run_id}/retry` | 重试失败步骤，不改写已完成历史 |
-| `DELETE` | `/api/conversations/{id}` | 永久删除会话和 checkpoints |
+| `GET` | `/api/conversations` | 分页获取会话 |
+| `GET` | `/api/conversations/{id}/messages` | 获取历史消息 / 查询 / 图表 |
+| `POST` | `/api/conversations/{id}/messages` | 同步发送消息 |
+| `POST` | `/api/conversations/{id}/analysis-runs` | 创建后台分析运行 |
+| `GET` | `/api/conversations/{id}/analysis-runs/latest` | 获取最近运行 |
+| `GET` | `/api/analysis-runs/{run_id}` | 获取运行详情 |
+| `GET` | `/api/analysis-runs/{run_id}/events` | SSE 事件流 |
+| `POST` | `/api/analysis-runs/{run_id}/retry` | 重试失败步骤 |
+| `DELETE` | `/api/conversations/{id}` | 永久删除会话与 checkpoints |
 
-发送消息：
+同步消息请求：
 
 ```json
 {
@@ -120,9 +298,7 @@ npm run dev
 }
 ```
 
-新的交互界面使用后台分析运行接口。创建成功返回 `202`，其中包含 `run_id`、当前状态以及随后生成的分析计划；客户端再订阅事件流。原同步消息接口继续保留兼容性。
-
-同步接口响应：
+同步接口响应会包含：
 
 ```json
 {
@@ -137,24 +313,100 @@ npm run dev
 }
 ```
 
-浏览器通过 `HttpOnly` 匿名 cookie 隔离会话。
+复杂分析建议使用 `analysis-runs` 接口；创建成功后由客户端订阅 SSE，而不是保持一个长时间同步 HTTP 请求。
 
-## 数据与安全
+## SQL 安全模型
 
-- `data/commerce_trace.db`：电商业务数据，只读访问。
-- `data/agent_state.db`：LangGraph checkpoints、会话目录与历史快照。
-- SQL 仅允许访问 `ecommerce` schema 中的八张白名单表。
-- `sqlglot` 校验只读 AST、危险函数、敏感值探索和行数上限。
-- 查询准备前必须通过 `get_schema` 取得所有引用表的列级上下文；紧凑表目录不会隐式授予 Schema 上下文。
-- 受治理核心指标由 `plan_metric_query` 按指标、维度和同义词确定性展开 SQL；其他只读 SQL 使用 `plan_query`。
-- `run_sql` 不接受任意 SQL，只能执行准备阶段签发且绑定语义模型指纹的 `prepared_query_id`。
-- 只读执行通过内存库 `ATTACH` 业务库并开启 `PRAGMA query_only = ON` 完成，单条语句带执行超时。
-- `DISTINCT` 值级探索仅允许低基数字段（地区、获客渠道、订单渠道、订单状态、品类、支付方式）；客户姓名、地址、电话、邮箱等敏感字段禁止。
-- 历史查询轨迹保存 prepared query ID、语义指纹、EXPLAIN 计划、SQL、列名、行数和最多 20 行预览。
+CommerceTrace 不把模型输出的 SQL 当作可信输入。
 
-## 代码检查
+### 1. 白名单 Schema
 
-后端行为测试覆盖语义模型、受控查询、分析运行状态机、动态计划、步骤完成条件、SSE 恢复和失败重试。运行：
+查询仅允许访问 `ecommerce` 语义范围内的业务表。
+
+### 2. Schema Context 前置要求
+
+模型在准备查询前，需要通过 `get_schema` 获取所引用表的列级上下文。表名目录本身不等价于完整 Schema 授权。
+
+### 3. 两类查询计划
+
+受治理的核心指标：
+
+```text
+plan_metric_query
+```
+
+其他只读分析：
+
+```text
+plan_query
+```
+
+### 4. Prepared Query
+
+`run_sql` 不接收任意 SQL 字符串，只接受准备阶段签发的：
+
+```text
+prepared_query_id
+```
+
+Prepared Query 同时绑定语义模型指纹，避免模型绕过准备 / 治理阶段。
+
+### 5. AST 与执行限制
+
+后端使用 `sqlglot` 检查：
+
+- 只读语句；
+- 非白名单表；
+- 危险函数；
+- 敏感字段探索；
+- 结果行数；
+- 值级 DISTINCT 探索；
+- 执行超时。
+
+SQL 在只读模式下执行，并保留 EXPLAIN 与查询轨迹。
+
+## 敏感字段与值探索
+
+低基数字段可以被用于受控 DISTINCT 探索，例如：
+
+- 地区；
+- 获客渠道；
+- 订单渠道；
+- 订单状态；
+- 品类；
+- 支付方式。
+
+客户姓名、地址、电话、邮箱等敏感字段不应被 Agent 用于自由枚举探索。
+
+## 查询工件
+
+为了让分析可审计，系统会保存与查询有关的信息，例如：
+
+- prepared query ID；
+- 语义模型指纹；
+- EXPLAIN 计划；
+- 最终 SQL；
+- 列名；
+- 行数；
+- 有限结果预览。
+
+这样用户可以区分“Agent 的解释”和“实际执行过的查询”。
+
+## 会话与恢复
+
+浏览器通过 HttpOnly 匿名 Cookie 区分会话。
+
+后台 Analysis Run 独立于一次 HTTP 请求存在，所以：
+
+- 刷新页面后可以恢复运行状态；
+- SSE 断线后可以重新订阅；
+- 已完成步骤不会因重连丢失；
+- 失败步骤可以单独重试；
+- 历史查询和图表可以恢复。
+
+## 开发命令
+
+根目录统一提供：
 
 ```bash
 npm test
@@ -163,15 +415,54 @@ npm run typecheck
 npm run build
 ```
 
+对应行为：
+
+```text
+npm test       → backend unittest
+npm run lint   → backend ruff
+npm run typecheck → backend mypy + frontend typecheck
+npm run build  → frontend production build
+```
+
+修改 Agent / Query Engine / Semantic Model 时，建议先跑最小相关测试，再跑完整命令集合。
+
 ## 手工验收清单
 
-1. 新建会话，确认列表立即出现“新会话”。
-2. 发送第一条消息，确认标题更新为清理空白后的前 6 个字符。
-3. 连续追问，确认 Agent 能引用同一会话的上下文。
-4. 请求复杂数据分析，确认计划先出现、同一时间只有一步进行中、完成步骤被划去。
-5. 刷新页面或断开网络后重新打开会话，确认计划、步骤和当前进度恢复。
-6. 让某一步失败，确认错误留在对应步骤且可单独重试，已完成步骤不被改写。
-7. 请求数据分析与图表，确认回答、查询预览和 Plotly 图表可见。
-8. 刷新页面并打开历史会话，确认最终消息、查询和图表恢复。
-9. 永久删除会话，确认列表、分析运行、事件和 Agent checkpoint 均不可恢复。
-10. 尝试写入 SQL、伪造 `prepared_query_id` 或访问非白名单表，确认工具拒绝执行。
+1. 新建会话后列表立即出现。
+2. 第一条消息后标题正确更新。
+3. 连续追问能使用同一会话上下文。
+4. 复杂分析先出现计划，再按步骤推进。
+5. 同一时刻只有当前步骤处于执行态。
+6. 刷新页面后分析状态可恢复。
+7. 制造某一步失败，确认已完成步骤不被重写。
+8. 重试失败步骤后可继续运行。
+9. 数据分析结果同时包含回答、查询轨迹和图表。
+10. 删除会话后，对应消息、运行、事件与 checkpoint 不再恢复。
+11. 尝试写入 SQL、伪造 prepared query ID 或查询非白名单表，确认被拒绝。
+
+## 项目边界
+
+CommerceTrace 当前面向 **本地 / 演示型电商分析场景**。如果接入真实生产数据库，建议进一步增加：
+
+- 企业身份认证 / RBAC；
+- 数据库凭据隔离；
+- 更严格的数据权限过滤；
+- 指标版本发布与变更审计；
+- 查询成本控制；
+- 模型调用审计和预算限制；
+- 更细粒度的 PII 脱敏；
+- 生产级任务队列与可观测性。
+
+LLM 负责帮助解释数据，不应替代经过治理的财务、经营或审计口径。
+
+## 文档
+
+深入理解工作流、状态转移、查询安全门和能力边界：
+
+```text
+docs/DataAgent工作流设计与实现详解.md
+```
+
+## License
+
+详见仓库中的 License / 项目声明（如后续调整，以仓库当前文件为准）。
